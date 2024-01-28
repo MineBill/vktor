@@ -31,6 +31,7 @@ create :: proc(width, height: int, title: cstring) -> (window: Window) {
 
     glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
     glfw.WindowHint(glfw.RESIZABLE, 1)
+    glfw.WindowHint(glfw.FLOATING, 1)
     window.handle = glfw.CreateWindow(cast(c.int)width, cast(c.int)height, title, nil, nil)
     return
 }

@@ -42,7 +42,7 @@ Uniform_Buffer_Object :: struct {
 
 Camera :: struct {
     position: vec3,
-    rotation: quaternion128,
+    rotation: mat4,
 }
 
 Application :: struct {
@@ -86,7 +86,6 @@ init :: proc(window: ^win.Window) -> rawptr {
     app.odin_context = context
 
     app.camera.position = vec3{3, 3, 3}
-    app.camera.rotation = linalg.quaternion_look_at(app.camera.position, vec3{0, 0, 0}, vec3{0, 1, 0})
 
     app.dbg_context = new(Debug_Context)
     app.dbg_context^ = Debug_Context{
@@ -165,6 +164,7 @@ init :: proc(window: ^win.Window) -> rawptr {
 @(export)
 update :: proc(mem: rawptr) -> bool {
     app := cast(^Application)mem
+    @static mouse: vec2
     event_loop: for event in app.window.event_context.events {
         #partial switch a in event {
         case win.KeyEvent:
@@ -174,6 +174,13 @@ update :: proc(mem: rawptr) -> bool {
             if a.key == .g {
                 log.debugf("Key event: %v", a)
                 image_set_lod_bias(app.image_view.image, 5)
+            }
+            if a.key == .e {
+                app.camera.position = vec3{2, 2, 2}
+            }
+            if a.key == .q {
+                app.camera.position = vec3{}
+                app.camera.rotation = mat4(1)
             }
         case win.WindowResizedEvent:
             log.debugf("Window resized: %v", a)
@@ -187,9 +194,24 @@ update :: proc(mem: rawptr) -> bool {
         }
     }
 
+    @static time_count := f32(0.0)
+    current_time := time.now()
+    t := f32(time.duration_seconds(time.diff(app.start_time, current_time)))
+    time_count += t
+
+    app.camera.position.y = math.sin(t)
+    app.camera.rotation = linalg.matrix4_look_at(app.camera.position, vec3{0, 0, 0}, vec3{0, -1, 0}, false)
+
     draw_frame(app)
 
     return false
+}
+
+@(export)
+reloaded :: proc(mem: rawptr) {
+    app := cast(^Application)mem
+    vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
+    vk.load_proc_addresses_instance(app.device.instance)
 }
 
 @(export)
@@ -220,22 +242,18 @@ destroy :: proc(mem: rawptr) {
 }
 
 update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
-    @static time_count := f32(0.0)
-    current_time := time.now()
-    t := f32(time.duration_seconds(time.diff(app.start_time, current_time)))
-    time_count += t
 
     ubo := Uniform_Buffer_Object {}
 
     ubo.model = linalg.MATRIX4F32_IDENTITY
-
-    pos := app.camera.position
-    pos.y = math.sin(t)
-    ubo.view  = linalg.matrix4_look_at(-pos, vec3{0, 0, 0}, vec3{0, -1, 0}, false)
+    rot := app.camera.rotation
+    trans := linalg.matrix4_translate(app.camera.position)
+    ubo.view  =  rot * trans
+    // ubo.view  = linalg.matrix4_look_at(-pos, vec3{0, 0, 0}, vec3{0, -1, 0}, false)
     ubo.proj  = linalg.matrix4_perspective(
         linalg.to_radians(f32(65.0)), 
         f32(app.swapchain.extent.width) / f32(app.swapchain.extent.height),
-        0.1, 10.0, false)
+        0.1, 100.0, false)
     mem.copy(app.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
 }
 

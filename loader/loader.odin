@@ -24,6 +24,7 @@ Symbol_Table :: struct {
     update:     #type proc(memory: rawptr) -> bool,
     destroy:    #type proc(memory: rawptr),
     get_size:   #type proc() -> int,
+    reloaded:   #type proc(memory: rawptr),
 
     __handle: dynlib.Library,
 }
@@ -49,10 +50,11 @@ load_symbols :: proc(table: ^Symbol_Table) {
     when ODIN_OS == .Windows {
         LIB_PATH :: "./bin/app-copy.dll"
         did_unload := dynlib.unload_library(table.__handle)
+        table.__handle = nil
         log.debugf("Did unload: %v", did_unload)
 
-        // libc.system("copy .\\bin\\app.dll .\\bin\\app-copy.dll")
-        copy_file(".\\bin\\app-copy.dll", ".\\bin\\app.dll")
+        libc.system("copy .\\bin\\app.dll .\\bin\\app-copy.dll")
+        // copy_file(".\\bin\\app-copy.dll", ".\\bin\\app.dll")
     } else when ODIN_OS == .Linux {
         LIB_PATH :: "./bin/app.so"
     }
@@ -104,6 +106,7 @@ main :: proc() {
             data.should_reload = false
             log.info("Reloading!!")
             load_symbols(&symbols)
+            symbols.reloaded(mem)
         }
 
         quit := symbols.update(mem)
