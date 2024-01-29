@@ -1,17 +1,19 @@
 package main
-import vk "vendor:vulkan"
 import "core:log"
+import vk "vendor:vulkan"
 
 Pipeline :: struct {
     device:   ^Device,
     pipeline: vk.Pipeline,
+    shader:   Shader,
 }
 
 Pipeline_Config_Info :: struct {
     layout:                     vk.PipelineLayout,
     descriptor_set_layout:      vk.DescriptorSetLayout,
+    descriptor_pool:            vk.DescriptorPool,
+    descriptor_sets:            []vk.DescriptorSet,
     renderpass:                 vk.RenderPass,
-
     viewport:                   vk.Viewport,
     scissor:                    vk.Rect2D,
     input_assembly_info:        vk.PipelineInputAssemblyStateCreateInfo,
@@ -49,7 +51,7 @@ default_pipeline_config :: proc() -> (config: Pipeline_Config_Info) {
     }
 
     colorblend_attachment_info = vk.PipelineColorBlendAttachmentState {
-        colorWriteMask = {
+        colorWriteMask =  {
             vk.ColorComponentFlag.R,
             vk.ColorComponentFlag.G,
             vk.ColorComponentFlag.B,
@@ -91,40 +93,38 @@ create_graphics_pipeline :: proc(
         return
     }
 
-    vert_module := create_shader_module(vert_code, device.device)
-    frag_module := create_shader_module(frag_code, device.device)
-    defer {
-        vk.DestroyShaderModule(device.device, vert_module, nil)
-        vk.DestroyShaderModule(device.device, frag_module, nil)
-    }
+    pipeline.shader = create_shader(
+        device,
+        "bin/assets/shaders/Builtin.Object.vert.spv",
+        "bin/assets/shaders/Builtin.Object.frag.spv",
+    )
+    // pipeline.shader.pipeline = &pipeline
 
     vert_stage_create_info := vk.PipelineShaderStageCreateInfo {
         sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {vk.ShaderStageFlag.VERTEX},
-        module = vert_module,
+        module = pipeline.shader.vertex_module,
         pName = "main",
     }
 
     frag_stage_create_info := vk.PipelineShaderStageCreateInfo {
         sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {vk.ShaderStageFlag.FRAGMENT},
-        module = frag_module,
+        module = pipeline.shader.fragment_module,
         pName = "main",
     }
 
     stages := []vk.PipelineShaderStageCreateInfo{vert_stage_create_info, frag_stage_create_info}
 
     binding_descriptions: []vk.VertexInputBindingDescription = {vertex_binding_description()}
-    log.infof("%#v", raw_data(binding_descriptions))
     attribute_descriptions := vertex_attribute_descriptions()
-    log.infof("%#v", raw_data(attribute_descriptions[:]))
 
     vertex_pipeline := vk.PipelineVertexInputStateCreateInfo {
         sType                           = vk.StructureType.PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         vertexBindingDescriptionCount   = u32(len(binding_descriptions)),
-        pVertexBindingDescriptions = raw_data(binding_descriptions),
+        pVertexBindingDescriptions      = raw_data(binding_descriptions),
         vertexAttributeDescriptionCount = u32(len(attribute_descriptions)),
-        pVertexAttributeDescriptions = raw_data(attribute_descriptions[:]),
+        pVertexAttributeDescriptions    = raw_data(attribute_descriptions[:]),
     }
 
     input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -149,20 +149,20 @@ create_graphics_pipeline :: proc(
     viewport := config.viewport
     scissor := config.scissor
     viewport_state_create_info := vk.PipelineViewportStateCreateInfo {
-        sType = vk.StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        sType         = vk.StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         viewportCount = 1,
-        pViewports = &viewport,
-        scissorCount = 1,
-        pScissors = &scissor,
+        pViewports    = &viewport,
+        scissorCount  = 1,
+        pScissors     = &scissor,
     }
 
     depth_stencil_create_info := vk.PipelineDepthStencilStateCreateInfo {
-        sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        depthTestEnable = true,
-        depthWriteEnable = true,
-        depthCompareOp = .LESS,
+        sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        depthTestEnable       = true,
+        depthWriteEnable      = true,
+        depthCompareOp        = .LESS,
         depthBoundsTestEnable = false,
-        stencilTestEnable = false,
+        stencilTestEnable     = false,
     }
 
     pipeline_create_info := vk.GraphicsPipelineCreateInfo {
@@ -199,6 +199,7 @@ create_graphics_pipeline :: proc(
 }
 
 destroy_grphics_pipeline :: proc(pipeline: ^Pipeline) {
+    destroy_shader(&pipeline.shader)
     vk.DestroyPipeline(pipeline.device.device, pipeline.pipeline, nil)
 }
 

@@ -1,7 +1,7 @@
 package main
-import vk "vendor:vulkan"
 import "core:log"
 import "vendor:glfw"
+import vk "vendor:vulkan"
 
 Swapchain :: struct {
     swapchain_image_format:     vk.Format,
@@ -11,7 +11,6 @@ Swapchain :: struct {
     // depth_image_memories:       [dynamic]vk.DeviceMemory,
     // depth_images:               [dynamic]vk.Image,
     // depth_image_views:          [dynamic]vk.ImageView,
-
     depth_image:                Image,
     depth_image_view:           Image_View,
     swapchain_images:           [dynamic]vk.Image,
@@ -68,7 +67,12 @@ create_swapchain :: proc(device: ^Device) -> (swapchain: Swapchain) {
     }
 
     swapchain_image_count: u32
-    vk.GetSwapchainImagesKHR(device.device, swapchain.swapchain_handle, &swapchain_image_count, nil)
+    vk.GetSwapchainImagesKHR(
+        device.device,
+        swapchain.swapchain_handle,
+        &swapchain_image_count,
+        nil,
+    )
 
     swapchain.swapchain_images = make([dynamic]vk.Image, swapchain_image_count)
     log.debug("Created", swapchain_image_count, "swapchain images")
@@ -112,7 +116,13 @@ destroy_swapchain :: proc(using swapchain: ^Swapchain) {
 }
 
 swapchain_acquire_next_image :: proc(swapchain: ^Swapchain) -> (index: u32, err: vk.Result) {
-    vk.WaitForFences(swapchain.device.device, 1, &swapchain.in_flight_fences[swapchain.current_frame], true, max(u64))
+    vk.WaitForFences(
+        swapchain.device.device,
+        1,
+        &swapchain.in_flight_fences[swapchain.current_frame],
+        true,
+        max(u64),
+    )
 
     err = vk.AcquireNextImageKHR(
         swapchain.device.device,
@@ -129,47 +139,62 @@ swapchain_acquire_next_image :: proc(swapchain: ^Swapchain) -> (index: u32, err:
         log.errorf("Failed to acquire next image: %v", err)
     }
 
-    vk.ResetFences(swapchain.device.device, 1, &swapchain.in_flight_fences[swapchain.current_frame])
+    vk.ResetFences(
+        swapchain.device.device,
+        1,
+        &swapchain.in_flight_fences[swapchain.current_frame],
+    )
     return
 }
 
 swapchain_submit_command_buffers :: proc(swapchain: ^Swapchain, buffers: []vk.CommandBuffer) {
-    wait_semaphores: []vk.Semaphore = {swapchain.image_available_semaphores[swapchain.current_frame]}
-    signal_semaphores: []vk.Semaphore = {swapchain.render_finished_semaphores[swapchain.current_frame]}
+    wait_semaphores: []vk.Semaphore =  {
+        swapchain.image_available_semaphores[swapchain.current_frame],
+    }
+    signal_semaphores: []vk.Semaphore =  {
+        swapchain.render_finished_semaphores[swapchain.current_frame],
+    }
     flags := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
 
     submit_info := vk.SubmitInfo {
-        sType = vk.StructureType.SUBMIT_INFO,
-        waitSemaphoreCount = u32(len(wait_semaphores)),
-        pWaitSemaphores = raw_data(wait_semaphores),
-        pWaitDstStageMask = &flags,
-        commandBufferCount = u32(len(buffers)),
-        pCommandBuffers = raw_data(buffers),
+        sType                = vk.StructureType.SUBMIT_INFO,
+        waitSemaphoreCount   = u32(len(wait_semaphores)),
+        pWaitSemaphores      = raw_data(wait_semaphores),
+        pWaitDstStageMask    = &flags,
+        commandBufferCount   = u32(len(buffers)),
+        pCommandBuffers      = raw_data(buffers),
         signalSemaphoreCount = u32(len(signal_semaphores)),
-        pSignalSemaphores = raw_data(signal_semaphores),
+        pSignalSemaphores    = raw_data(signal_semaphores),
     }
 
-    vk_check(vk.QueueSubmit(
+    vk_check(
+        vk.QueueSubmit(
             swapchain.device.graphics_queue,
             1,
             &submit_info,
-            swapchain.in_flight_fences[swapchain.current_frame]))
+            swapchain.in_flight_fences[swapchain.current_frame],
+        ),
+    )
 }
 
 swapchain_present :: proc(swapchain: ^Swapchain, image_index: u32) {
     image_index := image_index
-    wait_semaphores: []vk.Semaphore = {swapchain.image_available_semaphores[swapchain.current_frame]}
-    signal_semaphores: []vk.Semaphore = {swapchain.render_finished_semaphores[swapchain.current_frame]}
+    wait_semaphores: []vk.Semaphore =  {
+        swapchain.image_available_semaphores[swapchain.current_frame],
+    }
+    signal_semaphores: []vk.Semaphore =  {
+        swapchain.render_finished_semaphores[swapchain.current_frame],
+    }
 
     swapchains: []vk.SwapchainKHR = {swapchain.swapchain_handle}
 
     present_info := vk.PresentInfoKHR {
-        sType = vk.StructureType.PRESENT_INFO_KHR,
+        sType              = vk.StructureType.PRESENT_INFO_KHR,
         waitSemaphoreCount = u32(len(signal_semaphores)),
-        pWaitSemaphores = raw_data(signal_semaphores),
-        swapchainCount = u32(len(swapchains)),
-        pSwapchains = raw_data(swapchains),
-        pImageIndices = &image_index,
+        pWaitSemaphores    = raw_data(signal_semaphores),
+        swapchainCount     = u32(len(swapchains)),
+        pSwapchains        = raw_data(swapchains),
+        pImageIndices      = &image_index,
     }
 
     vk_check(vk.QueuePresentKHR(swapchain.device.present_queue, &present_info))
@@ -183,7 +208,10 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
             return format
         }
     }
-    log.warn("Could not find ideal format and colorspace for swap surface, choosing: %v", formats[0])
+    log.warn(
+        "Could not find ideal format and colorspace for swap surface, choosing: %v",
+        formats[0],
+    )
     return formats[0]
 }
 
@@ -273,7 +301,7 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
 
     attachment_ref := vk.AttachmentReference {
         attachment = 0,
-        layout = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        layout     = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
     }
 
     depth_attachment := vk.AttachmentDescription {
@@ -289,13 +317,13 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
 
     depth_attachment_ref := vk.AttachmentReference {
         attachment = 1,
-        layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        layout     = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     }
 
     subpass := vk.SubpassDescription {
-        pipelineBindPoint = vk.PipelineBindPoint.GRAPHICS,
-        colorAttachmentCount = 1,
-        pColorAttachments = &attachment_ref,
+        pipelineBindPoint       = vk.PipelineBindPoint.GRAPHICS,
+        colorAttachmentCount    = 1,
+        pColorAttachments       = &attachment_ref,
         pDepthStencilAttachment = &depth_attachment_ref,
     }
 
@@ -311,16 +339,21 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
     attachments := []vk.AttachmentDescription{attachment, depth_attachment}
 
     render_pass_create_info := vk.RenderPassCreateInfo {
-        sType = vk.StructureType.RENDER_PASS_CREATE_INFO,
+        sType           = vk.StructureType.RENDER_PASS_CREATE_INFO,
         attachmentCount = u32(len(attachments)),
-        pAttachments = raw_data(attachments),
-        subpassCount = 1,
-        pSubpasses = &subpass,
+        pAttachments    = raw_data(attachments),
+        subpassCount    = 1,
+        pSubpasses      = &subpass,
         dependencyCount = 1,
-        pDependencies = &dependency,
+        pDependencies   = &dependency,
     }
 
-    result := vk.CreateRenderPass(device.device, &render_pass_create_info, nil, &swapchain.renderpass)
+    result := vk.CreateRenderPass(
+        device.device,
+        &render_pass_create_info,
+        nil,
+        &swapchain.renderpass,
+    )
     if result != vk.Result.SUCCESS {
         log.error("Failed to crete render pass")
     }
@@ -332,8 +365,9 @@ create_depth_resources :: proc(swapchain: ^Swapchain) {
         swapchain.device,
         {.D32_SFLOAT, .D32_SFLOAT_S8_UINT, .D24_UNORM_S8_UINT},
         .OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT})
-    log.infof("Selected depth format: %v", format)
+        {.DEPTH_STENCIL_ATTACHMENT},
+    )
+    log.debugf("Selected depth format: %v", format)
 
     swapchain.depth_image = image_create(
         swapchain.device,
@@ -342,7 +376,8 @@ create_depth_resources :: proc(swapchain: ^Swapchain) {
         1,
         format,
         .OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT})
+        {.DEPTH_STENCIL_ATTACHMENT},
+    )
     swapchain.depth_image_view = image_view_create(&swapchain.depth_image, format, {.DEPTH})
 }
 
@@ -356,7 +391,7 @@ find_supported_format :: proc(
         props: vk.FormatProperties
         vk.GetPhysicalDeviceFormatProperties(device.physical_device, format, &props)
         if (tiling == .LINEAR && (props.linearTilingFeatures & features) == features) ||
-            (tiling == .OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+           (tiling == .OPTIMAL && (props.optimalTilingFeatures & features) == features) {
             return format
         }
     }
@@ -365,22 +400,31 @@ find_supported_format :: proc(
 
 create_framebuffers :: proc(using swapchain: ^Swapchain) {
     log.debugf("swapchain_image_views_len: %v ", len(swapchain_image_views))
-    framebuffers = make([dynamic]vk.Framebuffer, len(swapchain_image_views), len(swapchain_image_views))
+    framebuffers = make(
+        [dynamic]vk.Framebuffer,
+        len(swapchain_image_views),
+        len(swapchain_image_views),
+    )
 
     for view, i in swapchain_image_views {
-        attachments := []vk.ImageView {view, swapchain.depth_image_view.handle}
+        attachments := []vk.ImageView{view, swapchain.depth_image_view.handle}
 
         framebuffer_create_info := vk.FramebufferCreateInfo {
-            sType = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
-            renderPass = renderpass,
+            sType           = vk.StructureType.FRAMEBUFFER_CREATE_INFO,
+            renderPass      = renderpass,
             attachmentCount = u32(len(attachments)),
-            pAttachments = raw_data(attachments),
-            width = extent.width,
-            height = extent.height,
-            layers = 1,
+            pAttachments    = raw_data(attachments),
+            width           = extent.width,
+            height          = extent.height,
+            layers          = 1,
         }
 
-        result := vk.CreateFramebuffer(device.device, &framebuffer_create_info, nil, &framebuffers[i])
+        result := vk.CreateFramebuffer(
+            device.device,
+            &framebuffer_create_info,
+            nil,
+            &framebuffers[i],
+        )
         if result != vk.Result.SUCCESS {
             log.error("Failed to create framebuffer ", i)
         }

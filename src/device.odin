@@ -1,13 +1,13 @@
 package main
-import vk "vendor:vulkan"
-import "vendor:glfw"
+import win "../window"
 import "core:log"
 import "core:runtime"
 import "core:strings"
-import win "../window"
+import "vendor:glfw"
+import vk "vendor:vulkan"
 
 REQUIRED_VULKAN_LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
-REQUIRED_DEVICE_EXTENSIONS :: []cstring {vk.KHR_SWAPCHAIN_EXTENSION_NAME}
+REQUIRED_DEVICE_EXTENSIONS :: []cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
 
 Device :: struct {
     instance:        vk.Instance,
@@ -19,7 +19,6 @@ Device :: struct {
     surface:         vk.SurfaceKHR,
     graphics_queue:  vk.Queue,
     present_queue:   vk.Queue,
-
     properties:      vk.PhysicalDeviceProperties,
 }
 
@@ -29,6 +28,18 @@ create_device :: proc(window: ^win.Window, dbg: ^Debug_Context) -> (device: Devi
     device.debug_messenger = setup_debug_callback(device.instance, dbg)
     device.surface = win.create_vulkan_surface(device.instance, window^)
     pick_physical_device(&device)
+
+    split_version :: proc(version: u32) -> (major, minor, patch: u32) {
+        major = version >> 22 & 0x000000ff
+        minor = version >> 12 & 0x000000ff
+        patch = version & 0x000000ff
+        return
+        // return (major<<22) | (minor<<12) | (patch)
+    }
+    log.infof("Using GPU Device: %s", device.properties.deviceName)
+    log.infof("\tAPI Version: %v.%v.%v", split_version(device.properties.apiVersion))
+    log.infof("\tDriver Version: %v.%v.%v", split_version(device.properties.driverVersion))
+
     create_logical_device(&device)
     create_command_pool(&device)
 
@@ -51,21 +62,16 @@ destroy_device :: proc(device: ^Device) {
 
 device_create_descriptor_pool :: proc(device: ^Device, count: u32) -> (pool: vk.DescriptorPool) {
     sizes := []vk.DescriptorPoolSize {
-        {
-            type = vk.DescriptorType.UNIFORM_BUFFER,
-            descriptorCount = count,
-        },
-        {
-            type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER,
-            descriptorCount = count,
-        },
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
+        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = count},
     }
 
     pool_info := vk.DescriptorPoolCreateInfo {
-        sType = vk.StructureType.DESCRIPTOR_POOL_CREATE_INFO,
+        sType         = vk.StructureType.DESCRIPTOR_POOL_CREATE_INFO,
         poolSizeCount = u32(len(sizes)),
-        pPoolSizes = raw_data(sizes),
-        maxSets = count,
+        pPoolSizes    = raw_data(sizes),
+        maxSets       = count,
     }
 
     vk_check(vk.CreateDescriptorPool(device.device, &pool_info, nil, &pool))
@@ -81,17 +87,19 @@ device_allocate_descriptor_sets :: proc(
     pool: vk.DescriptorPool,
     count: u32,
     layout: vk.DescriptorSetLayout,
-) -> (set: []vk.DescriptorSet) {
+) -> (
+    set: []vk.DescriptorSet,
+) {
     layouts := make([]vk.DescriptorSetLayout, count, context.temp_allocator)
     for &l in layouts {
         l = layout
     }
 
     alloc_info := vk.DescriptorSetAllocateInfo {
-        sType = vk.StructureType.DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = pool,
+        sType              = vk.StructureType.DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool     = pool,
         descriptorSetCount = count,
-        pSetLayouts = raw_data(layouts),
+        pSetLayouts        = raw_data(layouts),
     }
 
     set = make([]vk.DescriptorSet, count)
@@ -223,9 +231,9 @@ end_single_time_command :: proc(device: ^Device, cmd: vk.CommandBuffer) {
     vk.EndCommandBuffer(cmd)
 
     submit_info := vk.SubmitInfo {
-        sType = vk.StructureType.SUBMIT_INFO,
+        sType              = vk.StructureType.SUBMIT_INFO,
         commandBufferCount = 1,
-        pCommandBuffers = &cmd,
+        pCommandBuffers    = &cmd,
     }
     vk.QueueSubmit(device.graphics_queue, 1, &submit_info, 0)
     vk.QueueWaitIdle(device.graphics_queue)
@@ -235,16 +243,13 @@ end_single_time_command :: proc(device: ^Device, cmd: vk.CommandBuffer) {
 
 create_command_buffer :: proc(device: ^Device) -> (buffer: vk.CommandBuffer) {
     alloc_info := vk.CommandBufferAllocateInfo {
-        sType = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
-        commandPool = device.command_pool,
-        level = .PRIMARY,
+        sType              = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool        = device.command_pool,
+        level              = .PRIMARY,
         commandBufferCount = 1,
     }
-    
-    vk_check(vk.AllocateCommandBuffers(
-            device.device,
-            &alloc_info,
-            &buffer))
+
+    vk_check(vk.AllocateCommandBuffers(device.device, &alloc_info, &buffer))
     return
 }
 
@@ -253,18 +258,16 @@ destroy_command_buffer :: proc(device: ^Device, buffer: vk.CommandBuffer) {
     vk.FreeCommandBuffers(device.device, device.command_pool, 1, raw_data(buffers))
 }
 
-create_command_buffers :: proc(device: ^Device, count: u32) -> (buffers:[]vk.CommandBuffer) {
+create_command_buffers :: proc(device: ^Device, count: u32) -> (buffers: []vk.CommandBuffer) {
     buffers = make([]vk.CommandBuffer, count)
     alloc_info := vk.CommandBufferAllocateInfo {
-        sType = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
-        commandPool = device.command_pool,
-        level = .PRIMARY,
+        sType              = vk.StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool        = device.command_pool,
+        level              = .PRIMARY,
         commandBufferCount = count,
     }
-    
-    vk_check(vk.AllocateCommandBuffers(
-            device.device,
-            &alloc_info, raw_data(buffers)))
+
+    vk_check(vk.AllocateCommandBuffers(device.device, &alloc_info, raw_data(buffers)))
     return
 }
 
@@ -276,7 +279,7 @@ free_command_buffers :: proc(device: ^Device, buffers: []vk.CommandBuffer) {
 device_find_memory_type :: proc(
     device: ^Device,
     type_filter: u32,
-    properties: vk.MemoryPropertyFlags
+    properties: vk.MemoryPropertyFlags,
 ) -> u32 {
     props: vk.PhysicalDeviceMemoryProperties
     vk.GetPhysicalDeviceMemoryProperties(device.physical_device, &props)
@@ -299,7 +302,6 @@ check_validation_layers :: proc() -> bool {
     log.info("Performing validation layer check")
     count: u32
     vk.EnumerateInstanceLayerProperties(&count, nil)
-    log.info("pepe, ", count)
 
     properties := make([]vk.LayerProperties, count, context.temp_allocator)
     vk.EnumerateInstanceLayerProperties(&count, raw_data(properties))
@@ -359,7 +361,12 @@ is_device_suitable :: proc(device: vk.PhysicalDevice, surface: vk.SurfaceKHR) ->
     props: vk.PhysicalDeviceFeatures
     vk.GetPhysicalDeviceFeatures(device, &props)
 
-    return is_queue_family_complete(indices) && extensions_supported && swapchain_good && props.samplerAnisotropy
+    return(
+        is_queue_family_complete(indices) &&
+        extensions_supported &&
+        swapchain_good &&
+        props.samplerAnisotropy \
+    )
 }
 
 Queue_Family_Indices :: struct {
@@ -418,13 +425,18 @@ create_logical_device :: proc(device: ^Device) {
     indices := get_queue_families(device.physical_device, device.surface)
 
     unique_families := get_unique_queue_families(indices)
-    queue_info := make([dynamic]vk.DeviceQueueCreateInfo, 0, len(unique_families), context.temp_allocator)
+    queue_info := make(
+        [dynamic]vk.DeviceQueueCreateInfo,
+        0,
+        len(unique_families),
+        context.temp_allocator,
+    )
 
     for fam in unique_families {
         queue_priority := []f32{1.0}
         append(
             &queue_info,
-            vk.DeviceQueueCreateInfo{
+            vk.DeviceQueueCreateInfo {
                 sType = vk.StructureType.DEVICE_QUEUE_CREATE_INFO,
                 queueFamilyIndex = fam,
                 queueCount = 1,
@@ -433,7 +445,7 @@ create_logical_device :: proc(device: ^Device) {
         )
     }
 
-    device_features := vk.PhysicalDeviceFeatures{
+    device_features := vk.PhysicalDeviceFeatures {
         samplerAnisotropy = true,
     }
 
@@ -484,7 +496,7 @@ get_required_extensions :: proc() -> []cstring {
 
 create_debug_info_struct :: proc(dbg: ^Debug_Context) -> vk.DebugUtilsMessengerCreateInfoEXT {
     return(
-        vk.DebugUtilsMessengerCreateInfoEXT{
+        vk.DebugUtilsMessengerCreateInfoEXT {
             sType = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             messageSeverity = {.ERROR, .VERBOSE, .WARNING},
             messageType = {.DEVICE_ADDRESS_BINDING, .GENERAL, .PERFORMANCE, .VALIDATION},
@@ -633,7 +645,7 @@ check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
         if !found {
             log.errorf("Required device extention '%s' not found!", required_device_extension)
             return false
-        }else {
+        } else {
             log.debug("Found required device extention: ", required_device_extension)
             break req
         }

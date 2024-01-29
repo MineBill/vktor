@@ -1,7 +1,7 @@
 package loader
+import "core:fmt"
 import "core:runtime"
 import "core:sys/windows"
-import "core:fmt"
 
 monitor_thread :: proc(data: rawptr) {
     // handle := cast(^windows.HANDLE)data
@@ -13,11 +13,23 @@ monitor_thread :: proc(data: rawptr) {
         case windows.WAIT_OBJECT_0:
             buffer: [1024]byte
             bytes_returned: u32
-            windows.ReadDirectoryChangesW(handle^, &buffer, u32(len(buffer)), false, windows.FILE_NOTIFY_CHANGE_LAST_WRITE, &bytes_returned, nil, nil)
+            windows.ReadDirectoryChangesW(
+                handle^,
+                &buffer,
+                u32(len(buffer)),
+                false,
+                windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
+                &bytes_returned,
+                nil,
+                nil,
+            )
 
             file_info := cast(^windows.FILE_NOTIFY_INFORMATION)&buffer
 
-            name, _ := windows.wstring_to_utf8(&file_info.file_name[0], cast(int)file_info.file_name_length)
+            name, _ := windows.wstring_to_utf8(
+                &file_info.file_name[0],
+                cast(int)file_info.file_name_length,
+            )
             if name == "app.dll" {
                 data.should_reload = true
             }
