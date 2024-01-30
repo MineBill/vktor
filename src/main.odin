@@ -12,9 +12,9 @@ import "core:time"
 import gltf "vendor:cgltf"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-import "core:sys/windows"
+// import "core:sys/windows"
 import "core:thread"
-import tracy "packages:odin-tracy"
+// import tracy "packages:odin-tracy"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -65,7 +65,7 @@ Camera :: struct {
 
 Thread_Data :: struct {
     paths:         []string,
-    handle:        windows.HANDLE,
+    handle:        rawptr,
     should_reload: bool,
 }
 
@@ -183,64 +183,66 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
 
     app.scene_data.main_light.color = vec4{1, 1, 1, 1}
 
-    // Create background threads to monitor shader source changes
-    background_thread :: proc(data: rawptr) {
-        data := cast(^Thread_Data)data
-        log.infof("Data: ", data)
-        handle := data.handle
-        for {
-            log.info("Waiting for signal")
-            wait_status := windows.WaitForSingleObject(handle, windows.INFINITE)
-            switch wait_status {
-            case windows.WAIT_OBJECT_0:
-                buffer: [1024]byte
-                bytes_returned: u32
-                windows.ReadDirectoryChangesW(
-                    handle,
-                    &buffer,
-                    u32(len(buffer)),
-                    false,
-                    windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-                    &bytes_returned,
-                    nil,
-                    nil,
-                )
+    when ODIN_OS == .Windows {
+        // Create background threads to monitor shader source changes
+        background_thread :: proc(data: rawptr) {
+            data := cast(^Thread_Data)data
+            log.infof("Data: ", data)
+            handle := data.handle
+            for {
+                log.info("Waiting for signal")
+                wait_status := windows.WaitForSingleObject(handle, windows.INFINITE)
+                switch wait_status {
+                case windows.WAIT_OBJECT_0:
+                    buffer: [1024]byte
+                    bytes_returned: u32
+                    windows.ReadDirectoryChangesW(
+                        handle,
+                        &buffer,
+                        u32(len(buffer)),
+                        false,
+                        windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
+                        &bytes_returned,
+                        nil,
+                        nil,
+                    )
 
-                file_info := cast(^windows.FILE_NOTIFY_INFORMATION)&buffer
+                    file_info := cast(^windows.FILE_NOTIFY_INFORMATION)&buffer
 
-                name, _ := windows.wstring_to_utf8(
-                    &file_info.file_name[0],
-                    cast(int)file_info.file_name_length,
-                )
-                log.infof("name: %v\n", name)
-                for path in data.paths {
-                    if strings.contains(path, name) {
-                        data.should_reload = true
+                    name, _ := windows.wstring_to_utf8(
+                        &file_info.file_name[0],
+                        cast(int)file_info.file_name_length,
+                    )
+                    log.infof("name: %v\n", name)
+                    for path in data.paths {
+                        if strings.contains(path, name) {
+                            data.should_reload = true
+                        }
                     }
-                }
 
-                windows.FindNextChangeNotification(handle)
-            case windows.WAIT_TIMEOUT:
-                // Does this need to be handled?
-                unreachable()
+                    windows.FindNextChangeNotification(handle)
+                case windows.WAIT_TIMEOUT:
+                    // Does this need to be handled?
+                    unreachable()
+                }
             }
         }
+
+        handle := windows.FindFirstChangeNotificationW(
+            windows.utf8_to_wstring("bin\\assets\\shaders"),
+            true,
+            windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
+        )
+        app.thread_data = new(Thread_Data)
+        app.thread_data.handle = handle
+
+        app.thread_data.paths = make([]string, 2)
+        copy(
+            app.thread_data.paths,
+            []string{app.simple_pipeline.shader.vertex_path, app.simple_pipeline.shader.fragment_path},
+        )
+        thread.run_with_data(app.thread_data, background_thread)
     }
-
-    handle := windows.FindFirstChangeNotificationW(
-        windows.utf8_to_wstring("bin\\assets\\shaders"),
-        true,
-        windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-    )
-    app.thread_data = new(Thread_Data)
-    app.thread_data.handle = handle
-
-    app.thread_data.paths = make([]string, 2)
-    copy(
-        app.thread_data.paths,
-        []string{app.simple_pipeline.shader.vertex_path, app.simple_pipeline.shader.fragment_path},
-    )
-    thread.run_with_data(app.thread_data, background_thread)
 
     return app
 }
@@ -287,16 +289,18 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
-    if app.thread_data.should_reload {
-        log.info("Reloading shaders")
-        app.simple_pipeline = create_pipeline(
-            &app.swapchain,
-            &app.device,
-            app.layout,
-            app.descriptor_layout,
-        )
-        create_cubemap_pipeline(&app.cubemap_pipeline)
-        app.thread_data.should_reload = false
+    when ODIN_OS == .Windows {
+        if app.thread_data.should_reload {
+            log.info("Reloading shaders")
+            app.simple_pipeline = create_pipeline(
+                &app.swapchain,
+                &app.device,
+                app.layout,
+                app.descriptor_layout,
+            )
+            create_cubemap_pipeline(&app.cubemap_pipeline)
+            app.thread_data.should_reload = false
+        }
     }
 
     if delta > 0.01 {
@@ -342,7 +346,9 @@ destroy :: proc(mem: rawptr) {
     app := cast(^Application)mem
     vk.DeviceWaitIdle(app.device.device)
 
-    windows.FindCloseChangeNotification(app.thread_data.handle)
+    when ODIN_OS == .Windows {
+        windows.FindCloseChangeNotification(app.thread_data.handle)
+    }
 
     scene_destroy(&app.scene)
 
@@ -397,6 +403,8 @@ update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
         100.0,
     )
     mem.copy(app.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
+
+    ubo.view_data.view = linalg.matrix4_from_quaternion(app.camera.rotation)
     mem.copy(app.cubemap_pipeline.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
 }
 

@@ -20,7 +20,7 @@ import "core:sys/windows"
 import "core:thread"
 import "vendor:glfw"
 import "core:time"
-import tracy "packages:odin-tracy"
+// import tracy "packages:odin-tracy"
 
 Symbol_Table :: struct {
     init:     #type proc(win: glfw.WindowHandle) -> rawptr,
@@ -58,55 +58,28 @@ load_symbols :: proc(table: ^Symbol_Table) {
     }
 }
 
-Thread_Data :: struct {
-    handle:        rawptr,
-    should_reload: bool,
-}
-
 main :: proc() {
     context.logger = log.create_console_logger(
         .Debug,
         opt = {.Level, .Terminal_Color},
     )
 
-    // tracy.SetThreadName("main")
-    // context.allocator = tracy.MakeProfiledAllocator(
-    //     self              = &tracy.ProfiledAllocatorData{},
-    //     callstack_size    = 5,
-    //     backing_allocator = context.allocator,
-    //     secure            = true,
-    // )
-
     symbols: Symbol_Table
     load_symbols(&symbols)
 
-    data := Thread_Data{}
+    data := init_watcher()
+    thread.create_and_start_with_data(&data, watcher_thread)
+    // } else when ODIN_OS == .Windows {
+    //     handle := windows.FindFirstChangeNotificationW(
+    //         windows.utf8_to_wstring("bin"),
+    //         false,
+    //         windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
+    //     )
+    //     defer windows.FindCloseChangeNotification(handle)
 
-    when ODIN_OS == .Linux {
-        fd := inotify.init()
-
-        // We watch the bin folder instead of the library file itself because once
-        // the compiler deletes it, the underlying inode will be invalidated.
-        handle, _ := inotify.add_watch(
-            fd,
-            "/home/minebill/source/VulkanTest/bin/",
-            {.Create},
-        )
-        defer inotify.rm_watch(fd, handle)
-
-        data.handle = &handle
-        thread.create_and_start_with_data(&data, monitor_thread)
-    } else when ODIN_OS == .Windows {
-        handle := windows.FindFirstChangeNotificationW(
-            windows.utf8_to_wstring("bin"),
-            false,
-            windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-        )
-        defer windows.FindCloseChangeNotification(handle)
-
-        data.handle = &handle
-        thread.create_and_start_with_data(&data, monitor_thread)
-    }
+    //     data.handle = &handle
+    //     thread.create_and_start_with_data(&data, monitor_thread)
+    // }
 
     win.initialize_windowing()
     window := win.create(640, 480, "Vulkan Window")
@@ -118,9 +91,9 @@ main :: proc() {
         // defer tracy.FrameMark()
         win.update(&window)
 
-        if data.should_reload {
-            // tracy.ZoneN("Hot Reload")
-            data.should_reload = false
+        if watcher_should_reload(data) {
+            watcher_reset(&data)
+
             log.info("Game reload requested. Reloading..")
 
             new_symbols: Symbol_Table

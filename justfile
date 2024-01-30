@@ -4,16 +4,16 @@ collections := "awd"
 
 tracy := "false"
 
-# debug := "-debug"
-debug := ""
+debug := "-debug"
+# debug := ""
 
 alias a1 := build
 alias a2 := build-assets
 
 build:
-    odin build src -build-mode:dll -define:VALIDATION=true \
-    -out:bin/app.dll -show-timings -o:none -use-separate-modules \
-    -collection:packages=packages -define:GLFW_SHARED=true {{debug}} \
+    odin build src -build-mode:shared -define:VALIDATION=true \
+    -out:bin/app.so -show-timings -o:none -use-separate-modules \
+    -collection:packages=packages -define:GLFW_SHARED=false {{debug}} \
     -define:TRACY_ENABLE={{tracy}}
 
 build-assets:
@@ -28,7 +28,7 @@ build-assets:
 
 run:
     odin run loader -use-separate-modules -collection:packages=packages \
-    -o:none -define:GLFW_SHARED=true {{debug}} -define:TRACY_ENABLE={{tracy}}
+    -o:none -define:GLFW_SHARED=false {{debug}} -define:TRACY_ENABLE={{tracy}}
 
 debugger:
     raddbg.exe --profile:vulkan_test.raddbgprofile -auto_run

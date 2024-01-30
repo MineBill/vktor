@@ -52,12 +52,12 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
     create_cubemap_pipeline(pipeline)
 
     file_names := [6]string {
-        "assets/textures/skybox/front.jpg",
-        "assets/textures/skybox/back.jpg",
-        "assets/textures/skybox/top.jpg",
-        "assets/textures/skybox/bottom.jpg",
         "assets/textures/skybox/right.jpg",
         "assets/textures/skybox/left.jpg",
+        "assets/textures/skybox/top.jpg",
+        "assets/textures/skybox/bottom.jpg",
+        "assets/textures/skybox/front.jpg",
+        "assets/textures/skybox/back.jpg",
     }
 
     pipeline.image = cubemap_image_load_from_files(device, file_names)
@@ -276,8 +276,8 @@ create_cubemap_pipeline :: proc(pipeline: ^Cubemap_Pipeline) {
 
     depth_stencil_create_info := vk.PipelineDepthStencilStateCreateInfo {
         sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        depthTestEnable       = true,
-        depthWriteEnable      = false,
+        depthTestEnable       = false,
+        depthWriteEnable      = true,
         depthCompareOp        = .LESS,
         depthBoundsTestEnable = false,
         stencilTestEnable     = false,

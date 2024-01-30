@@ -251,56 +251,58 @@ image_generate_mipmaps :: proc(image: ^Image, layer_count: u32 = 1) {
         },
     }
 
-    width  := i32(image.width)
-    height := i32(image.height)
 
-    for i in 1 ..< image.mip_levels {
-        log.debugf("Generating mip level %v", i)
-        barrier.subresourceRange.baseMipLevel = i - 1
-        barrier.oldLayout = .TRANSFER_DST_OPTIMAL
-        barrier.newLayout = .TRANSFER_SRC_OPTIMAL
-        barrier.srcAccessMask = {.TRANSFER_WRITE}
-        barrier.dstAccessMask = {.TRANSFER_READ}
+    for j in 0 ..< image.layer_count {
+        width  := i32(image.width)
+        height := i32(image.height)
+        for i in 1 ..< image.mip_levels {
+            log.debugf("Generating mip level %v", i)
+            barrier.subresourceRange.baseMipLevel = i - 1
+            barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+            barrier.newLayout = .TRANSFER_SRC_OPTIMAL
+            barrier.srcAccessMask = {.TRANSFER_WRITE}
+            barrier.dstAccessMask = {.TRANSFER_READ}
 
-        vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.TRANSFER}, {}, 0, nil, 0, nil, 1, &barrier)
+            vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.TRANSFER}, {}, 0, nil, 0, nil, 1, &barrier)
 
-        blit := vk.ImageBlit{
-            srcOffsets = {
-                {0, 0, 0},
-                {width, height, 1},
-            },
-            dstOffsets = {
-                {0, 0, 0},
-                {width > 1 ? width / 2: 1, height > 1 ? height / 2: 1, 1},
-            },
-            srcSubresource = vk.ImageSubresourceLayers {
-                aspectMask = {.COLOR},
-                mipLevel = i - 1,
-                baseArrayLayer = 0,
-                layerCount = 1,
-            },
-            dstSubresource = vk.ImageSubresourceLayers {
-                aspectMask = {.COLOR},
-                mipLevel = i,
-                baseArrayLayer = 0,
-                layerCount = 1,
-            },
+            blit := vk.ImageBlit{
+                srcOffsets = {
+                    {0, 0, 0},
+                    {width, height, 1},
+                },
+                dstOffsets = {
+                    {0, 0, 0},
+                    {width > 1 ? width / 2: 1, height > 1 ? height / 2: 1, 1},
+                },
+                srcSubresource = vk.ImageSubresourceLayers {
+                    aspectMask = {.COLOR},
+                    mipLevel = i - 1,
+                    baseArrayLayer = j,
+                    layerCount = 1,
+                },
+                dstSubresource = vk.ImageSubresourceLayers {
+                    aspectMask = {.COLOR},
+                    mipLevel = i,
+                    baseArrayLayer = j,
+                    layerCount = 1,
+                },
+            }
+
+            vk.CmdBlitImage(
+                cmd, 
+                image.handle, .TRANSFER_SRC_OPTIMAL,
+                image.handle, .TRANSFER_DST_OPTIMAL,
+                1, &blit, .LINEAR)
+
+            barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
+            barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+            barrier.srcAccessMask = {.TRANSFER_READ}
+            barrier.dstAccessMask = {.SHADER_READ}
+
+            vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
+            if width > 1 do width /= 2
+            if height > 1 do height /= 2
         }
-
-        vk.CmdBlitImage(
-            cmd, 
-            image.handle, .TRANSFER_SRC_OPTIMAL,
-            image.handle, .TRANSFER_DST_OPTIMAL,
-            1, &blit, .LINEAR)
-
-        barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
-        barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
-        barrier.srcAccessMask = {.TRANSFER_READ}
-        barrier.dstAccessMask = {.SHADER_READ}
-
-        vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
-        if width > 1 do width /= 2
-        if height > 1 do height /= 2
     }
 
     barrier.subresourceRange.baseMipLevel = image.mip_levels - 1
