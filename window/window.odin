@@ -4,6 +4,7 @@ import "core:log"
 import vk "vendor:vulkan"
 import "core:c"
 import "core:strings"
+import "core:fmt"
 
 Window :: struct {
     handle:        glfw.WindowHandle,
@@ -45,9 +46,8 @@ should_close :: proc(window: Window) -> bool {
 }
 
 update :: proc(window: ^Window) {
-    clear(&window.event_context.events)
-    flush_input()
-    glfw.PollEvents()
+    // glfw.PollEvents()
+    glfw.WaitEventsTimeout(1 / 144)
 }
 
 get_extent :: proc(window: ^Window) -> vk.Extent2D {

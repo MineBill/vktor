@@ -1,5 +1,4 @@
 package main
-import win "../window"
 import "core:log"
 import "core:runtime"
 import "core:strings"
@@ -13,7 +12,7 @@ Device :: struct {
     instance:        vk.Instance,
     debug_messenger: vk.DebugUtilsMessengerEXT,
     physical_device: vk.PhysicalDevice,
-    window:          ^win.Window,
+    window:          glfw.WindowHandle,
     command_pool:    vk.CommandPool,
     device:          vk.Device,
     surface:         vk.SurfaceKHR,
@@ -22,11 +21,16 @@ Device :: struct {
     properties:      vk.PhysicalDeviceProperties,
 }
 
-create_device :: proc(window: ^win.Window, dbg: ^Debug_Context) -> (device: Device) {
+create_device :: proc(window: glfw.WindowHandle, dbg: ^Debug_Context) -> (device: Device) {
     device.window = window
     device.instance = create_vulkan_instance(dbg)
     device.debug_messenger = setup_debug_callback(device.instance, dbg)
-    device.surface = win.create_vulkan_surface(device.instance, window^)
+
+    result := glfw.CreateWindowSurface(device.instance, window, nil, &device.surface)
+    if result != vk.Result.SUCCESS {
+        log.error("Failed to create window surface")
+    }
+
     pick_physical_device(&device)
 
     split_version :: proc(version: u32) -> (major, minor, patch: u32) {
@@ -60,12 +64,12 @@ destroy_device :: proc(device: ^Device) {
     vk.DestroyInstance(device.instance, nil)
 }
 
-device_create_descriptor_pool :: proc(device: ^Device, count: u32) -> (pool: vk.DescriptorPool) {
-    sizes := []vk.DescriptorPoolSize {
-        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
-        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
-        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = count},
-    }
+device_create_descriptor_pool :: proc(device: ^Device, count: u32, sizes: []vk.DescriptorPoolSize) -> (pool: vk.DescriptorPool) {
+    // sizes := []vk.DescriptorPoolSize {
+    //     {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
+    //     {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
+    //     {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = count},
+    // }
 
     pool_info := vk.DescriptorPoolCreateInfo {
         sType         = vk.StructureType.DESCRIPTOR_POOL_CREATE_INFO,

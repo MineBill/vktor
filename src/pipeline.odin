@@ -3,9 +3,10 @@ import "core:log"
 import vk "vendor:vulkan"
 
 Pipeline :: struct {
-    device:   ^Device,
-    pipeline: vk.Pipeline,
-    shader:   Shader,
+    device:     ^Device,
+    handle:   vk.Pipeline,
+    shader:     Shader,
+    config:     Pipeline_Config_Info,
 }
 
 Pipeline_Config_Info :: struct {
@@ -83,27 +84,17 @@ create_graphics_pipeline :: proc(
 ) {
     config := config
     pipeline.device = device
-    vert_code := load_shader_from_file("bin/assets/shaders/Builtin.Object.vert.spv")
-    frag_code := load_shader_from_file("bin/assets/shaders/Builtin.Object.frag.spv")
-    defer {
-        delete(vert_code)
-        delete(frag_code)
-    }
-    if vert_code == nil || frag_code == nil {
-        return
-    }
 
     pipeline.shader = create_shader(
         device,
-        "bin/assets/shaders/Builtin.Object.vert.spv",
-        "bin/assets/shaders/Builtin.Object.frag.spv",
+        "bin/assets/shaders/Builtin.Object.spv",
     )
     // pipeline.shader.pipeline = &pipeline
 
     vert_stage_create_info := vk.PipelineShaderStageCreateInfo {
         sType = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {vk.ShaderStageFlag.VERTEX},
-        module = pipeline.shader.vertex_module,
+        module = pipeline.shader.fragment_module,
         pName = "main",
     }
 
@@ -190,7 +181,7 @@ create_graphics_pipeline :: proc(
         1,
         &pipeline_create_info,
         nil,
-        &pipeline.pipeline,
+        &pipeline.handle,
     )
     if result != vk.Result.SUCCESS {
         log.error("Failed to crete graphics pipeline")
@@ -200,9 +191,9 @@ create_graphics_pipeline :: proc(
 
 destroy_grphics_pipeline :: proc(pipeline: ^Pipeline) {
     destroy_shader(&pipeline.shader)
-    vk.DestroyPipeline(pipeline.device.device, pipeline.pipeline, nil)
+    vk.DestroyPipeline(pipeline.device.device, pipeline.handle, nil)
 }
 
 pipeline_bind :: proc(pipeline: ^Pipeline, command_buffer: vk.CommandBuffer) {
-    vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, pipeline.pipeline)
+    vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, pipeline.handle)
 }

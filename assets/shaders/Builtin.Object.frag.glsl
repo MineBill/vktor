@@ -22,7 +22,7 @@ layout(location = 0) out vec4 outColor;
 void main() {
     /* vec4 ambient = vec4(0, 0, 1, 1) * 0.1;
     outColor = vec4(1, 1, 1, 1) * texture(texSampler, fragTexCoord) * material.albedo_color + ambient; */
-    vec3 ambient = vec3(1, 1, 1) * 0.1;
+    vec3 ambient = vec3(1, 0, 1) * 0.01;
     vec3 norm = normalize(fragNormal);
     vec3 lightDir = normalize(scene_data.main_light.position.xyz - fragPos);
     float diff = max(dot(norm, lightDir), 0.0);
@@ -30,9 +30,10 @@ void main() {
 
     vec3 view_dir = normalize(scene_data.view_position.xyz - fragPos);
     vec3 reflected_light = reflect(-lightDir, norm);
-    float spec = pow(max(dot(reflected_light, view_dir), 0.0), 64);
+    float spec = pow(max(dot(view_dir, reflected_light), 0.0), 64);
     vec3 specular = spec * scene_data.main_light.color.xyz;
 
     vec3 result = (ambient + diffuse + specular) * vec3(material.albedo_color);
     outColor = vec4(result, 1.0);
+    // outColor = vec4(1, 0, 0, 1);
 }

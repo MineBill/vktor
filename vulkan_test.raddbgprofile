@@ -6,7 +6,7 @@ target:
 {
   exe:               "loader.exe"
   arguments:         ""
-  working_directory: "bin"
+  working_directory: "../VulkanTest"
   active:            1
 }
 

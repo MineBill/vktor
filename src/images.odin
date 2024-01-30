@@ -21,7 +21,7 @@ Image_View :: struct {
     handle: vk.ImageView,
 }
 
-image_load_from_file :: proc(device: ^Device, file_name: string) -> (image: Image) {
+image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.ImageCreateFlags{}) -> (image: Image) {
     data, ok := os.read_entire_file(file_name)
     if !ok {
         log.errorf("Failed to open '%v'", file_name)
@@ -53,7 +53,8 @@ image_load_from_file :: proc(device: ^Device, file_name: string) -> (image: Imag
         mip_levels,
         .R8G8B8A8_SRGB,
         .OPTIMAL,
-        {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED})
+        {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
+        flags)
 
     transition_image_layout(&image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     buffer_copy_to_image(&staging, &image)
@@ -65,6 +66,14 @@ image_load_from_file :: proc(device: ^Device, file_name: string) -> (image: Imag
     return
 }
 
+cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) -> (image: Image) {
+    for file in file_names {
+
+    }
+
+    return
+}
+
 image_create :: proc(
     device: ^Device,
     width, height: u32,
@@ -72,6 +81,7 @@ image_create :: proc(
     format: vk.Format,
     tiling: vk.ImageTiling,
     usage: vk.ImageUsageFlags,
+    flags := vk.ImageCreateFlags{},
 ) -> (image: Image) {
     image.device = device
     image.mip_levels = mip_levels
@@ -95,6 +105,7 @@ image_create :: proc(
         usage = usage,
         sharingMode = .EXCLUSIVE,
         samples = {._1},
+        flags = flags,
     }
 
     vk_check(vk.CreateImage(device.device, &image_info, nil, &image.handle))
@@ -193,7 +204,7 @@ image_generate_mipmaps :: proc(image: ^Image) {
     height := i32(image.height)
 
     for i in 1 ..< image.mip_levels {
-        log.debugf("Generating mip level %v", i)
+        // log.debugf("Generating mip level %v", i)
         barrier.subresourceRange.baseMipLevel = i - 1
         barrier.oldLayout = .TRANSFER_DST_OPTIMAL
         barrier.newLayout = .TRANSFER_SRC_OPTIMAL
@@ -278,7 +289,6 @@ image_view_create_raw :: proc(device: ^Device, image: vk.Image, mip_levels: u32,
 
     vk_check(vk.CreateImageView(device.device, &view_info, nil, &view))
     return
-    
 }
 
 image_view_destroy :: proc(view: ^Image_View) {

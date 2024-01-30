@@ -12,9 +12,9 @@ import "core:time"
 import gltf "vendor:cgltf"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-import win "../window"
 import "core:sys/windows"
 import "core:thread"
+import tracy "packages:odin-tracy"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -57,8 +57,10 @@ Scene_Data :: struct {
 }
 
 Camera :: struct {
-    position: vec3,
-    rotation: mat4,
+    position:       vec3,
+    rotation:       quaternion128,
+    euler_angles:   vec3,
+    fov:            f32,
 }
 
 Thread_Data :: struct {
@@ -68,7 +70,7 @@ Thread_Data :: struct {
 }
 
 Application :: struct {
-    window:                 ^win.Window,
+    window:                 glfw.WindowHandle,
     start_time:             time.Time,
     device:                 Device,
     swapchain:              Swapchain,
@@ -92,14 +94,17 @@ Application :: struct {
     thread:                 ^thread.Thread,
 
     scene_data:             Scene_Data,
+    event_context:          Event_Context,
+    mouse_locked:           bool,
 }
 
 @(export)
-init :: proc(window: ^win.Window) -> rawptr {
+init :: proc(window: glfw.WindowHandle) -> rawptr {
+    // tracy.ZoneN("Application Init")
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
-        log.errorf("Vulkan proc is nil after loading proc addresses. Something is up.", a)
+        log.errorf("Vulkan proc is nil after loading proc addresses. Something is up: %v", a)
     }
 
     app := new(Application)
@@ -108,18 +113,30 @@ init :: proc(window: ^win.Window) -> rawptr {
 
     app.odin_context = context
 
-    app.camera.position = vec3{3, 3, 3}
+    app.camera.position = vec3{1, 1, 1}
+    NOT_PI :: 3.14
+    app.camera.euler_angles = vec3{0, NOT_PI/2, 0}
+    app.camera.fov = 50
 
     app.dbg_context = new(Debug_Context)
     app.dbg_context^ = Debug_Context {
         logger = context.logger,
     }
+    app.event_context.odin_context = context
+
+    setup_events(window, &app.event_context)
 
     app.device = create_device(window, app.dbg_context)
-    app.swapchain = create_swapchain(&app.device)
+    // app.swapchain = create_swapchain(&app.device)
+    init_swapchain(&app.device, &app.swapchain)
 
     app.descriptor_layout = create_descriptor_set_layout(&app.device)
-    app.descriptor_pool = device_create_descriptor_pool(&app.device, MAX_FRAMES_IN_FLIGHT)
+    app.descriptor_pool = device_create_descriptor_pool(&app.device, MAX_FRAMES_IN_FLIGHT, {
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+        },
+    )
     app.descriptor_sets = device_allocate_descriptor_sets(
         &app.device,
         app.descriptor_pool,
@@ -152,7 +169,7 @@ init :: proc(window: ^win.Window) -> rawptr {
     //     4, 5, 6, 6, 7, 4,
     // }
 
-    app.scene = scene_load_from_file(app, "assets/models/cube.glb")
+    app.scene = scene_load_from_file(app, "assets/models/scene.glb")
 
     app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
     app.image_view = image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
@@ -224,39 +241,44 @@ init :: proc(window: ^win.Window) -> rawptr {
 }
 
 @(export)
-update :: proc(mem: rawptr) -> bool {
+update :: proc(mem: rawptr, delta: f64) -> bool {
+    // tracy.ZoneN("Application Update")
     app := cast(^Application)mem
     @(static)
     mouse: vec2
-    event_loop: for event in app.window.event_context.events {
+    event_loop: for event in app.event_context.events {
         #partial switch a in event {
-        case win.KeyEvent:
+        case KeyEvent:
             if a.key == .escape {
                 return true
             }
-            if a.key == .g {
-                log.debugf("Key event: %v", a)
-                image_set_lod_bias(app.image_view.image, 5)
+
+            if a.key == .f && a.state == .pressed {
+                app.mouse_locked = !app.mouse_locked
+                log.infof("Mouse is now %v", "locked" if app.mouse_locked else "unlocked")
+                if app.mouse_locked {
+                    glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+                } else {
+                    glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+                }
             }
-            if a.key == .e {
-                app.camera.position = vec3{2, 2, 2}
-            }
-            if a.key == .q {
-                app.camera.position = vec3{}
-                app.camera.rotation = mat4(1)
-            }
-            if (a.key == .r && a.state == .pressed) {
-                // Reload shaders
-                log.info("Reload shaders!")
-            }
-        case win.WindowResizedEvent:
-            log.debugf("Window resized: %v", a)
+
+        case WindowResizedEvent:
             if a.size.x == 0 || a.size.y == 0 {
                 app.minimized = true
                 break event_loop
             }
             app.minimized = false
             app.resized = true
+
+        case MousePositionEvent:
+            delta_mouse := a.pos - mouse
+            if app.mouse_locked {
+                SPEED :: 100
+                app.camera.euler_angles.xy += delta_mouse.yx * SPEED * f32(delta)
+            }
+
+            mouse = a.pos
         }
     }
 
@@ -271,24 +293,30 @@ update :: proc(mem: rawptr) -> bool {
         app.thread_data.should_reload = false
     }
 
+    if delta > 0.01 {
+        log.warnf("Very high delta: %v", delta)
+    }
+
     @(static)
     time_count := f32(0.0)
     current_time := time.now()
     t := f32(time.duration_seconds(time.diff(app.start_time, current_time)))
 
-    app.camera.position.y = math.sin(t * 1) * 1
-    app.camera.rotation = linalg.matrix4_look_at(
-        app.camera.position,
-        vec3{0, 0, 0},
-        vec3{0, -1, 0},
-        false,
-    )
+    input := get_vector(.d, .a, .w, .s) * 1
+    up_down := get_axis(.space, .left_control)
+    app.camera.position.xz += ( vec4{input.x, 0, -input.y, 0} * linalg.matrix4_from_quaternion(app.camera.rotation)).xz * f32(delta)
+    app.camera.position.y += up_down * f32(delta)
+
+    app.scene_data.view_position.xyz = app.camera.position
     light := &app.scene_data.main_light
-    light.position = vec4{-3, 3, -3, 0}
-    light.position.y = -math.sin(t * 1) * 1
+    light.position = vec4{1, 1, 1, 0}
+    // light.position.y = math.sin(t * 1) * 1
     light.color = vec4{1, 1, 1, 0}
 
     draw_frame(app)
+
+    flush_input()
+    event_context_clear(&app.event_context)
 
     return false
 }
@@ -299,13 +327,18 @@ reloaded :: proc(mem: rawptr) {
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     vk.load_proc_addresses_instance(app.device.instance)
 
+    setup_events(app.window, &app.event_context)
     // Restart background shader monitoring thread
 }
 
 @(export)
 destroy :: proc(mem: rawptr) {
     app := cast(^Application)mem
+    vk.DeviceWaitIdle(app.device.device)
+
     windows.FindCloseChangeNotification(app.thread_data.handle)
+
+    scene_destroy(&app.scene)
 
     for &buffer in app.uniform_buffers {
         buffer_destroy(&buffer)
@@ -330,21 +363,32 @@ destroy :: proc(mem: rawptr) {
     free(app)
 }
 
+@(export)
+get_size :: proc() -> int { return size_of(Application) }
+
 update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
     ubo := Uniform_Buffer_Object{}
 
     ubo.scene_data = app.scene_data
     ubo.view_data.model = linalg.MATRIX4F32_IDENTITY
-    rot := app.camera.rotation
-    trans := linalg.matrix4_translate(app.camera.position)
-    ubo.view_data.view = rot * trans
-    // ubo.view  = linalg.matrix4_look_at(-pos, vec3{0, 0, 0}, vec3{0, -1, 0}, false)
+
+    euler := app.camera.euler_angles
+    app.camera.rotation = linalg.quaternion_from_euler_angles(
+        euler.x * math.RAD_PER_DEG,
+        euler.y * math.RAD_PER_DEG,
+        euler.z * math.RAD_PER_DEG,
+        .XYZ)
+
+    pos := app.camera.position
+    trans := linalg.matrix4_translate(pos)
+
+    // ubo.view_data.view = linalg.inverse(trans * linalg.matrix4_from_quaternion(app.camera.rotation))
+    ubo.view_data.view = linalg.matrix4_from_quaternion(app.camera.rotation) * linalg.inverse(trans)
     ubo.view_data.proj = linalg.matrix4_perspective(
-        linalg.to_radians(f32(45.0)),
+        linalg.to_radians(f32(app.camera.fov)),
         f32(app.swapchain.extent.width) / f32(app.swapchain.extent.height),
         0.1,
         100.0,
-        false,
     )
     mem.copy(app.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
 }
@@ -393,6 +437,15 @@ create_uniform_buffers :: proc(app: ^Application) {
              {
                 sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
                 dstSet = app.descriptor_sets[i],
+                dstBinding = 0,
+                dstArrayElement = 0,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &buffer_info,
+            },
+             {
+                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+                dstSet = app.cubemap_descriptor_sets[i],
                 dstBinding = 0,
                 dstArrayElement = 0,
                 descriptorType = .UNIFORM_BUFFER,
@@ -510,6 +563,71 @@ create_pipeline :: proc(
     return
 }
 
+create_cubmap_uniform_buffers :: proc(app: ^Application) {
+    app.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
+    app.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
+
+    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+        size := u32(size_of(Uniform_Buffer_Object))
+        app.uniform_buffers[i] = buffer_create(
+            &app.device,
+            size,
+            {.UNIFORM_BUFFER},
+            {.HOST_VISIBLE, .HOST_COHERENT},
+        )
+
+        vk.MapMemory(
+            app.device.device,
+            app.uniform_buffers[i].memory,
+            0,
+            vk.DeviceSize(size),
+            {},
+            &app.uniform_mapped_buffers[i],
+        )
+
+        buffer_info := vk.DescriptorBufferInfo {
+            buffer = app.uniform_buffers[i].handle,
+            offset = 0,
+            range  = size_of(Uniform_Buffer_Object),
+        }
+
+        image_info := vk.DescriptorImageInfo {
+            imageLayout = .READ_ONLY_OPTIMAL,
+            imageView   = app.image_view.handle,
+            sampler     = app.image_view.image.sampler,
+        }
+
+        descriptor_writes := []vk.WriteDescriptorSet {
+             {
+                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+                dstSet = app.cubemap_descriptor_sets[i],
+                dstBinding = 0,
+                dstArrayElement = 0,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &buffer_info,
+            },
+             {
+                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+                dstSet = app.cubemap_descriptor_sets[i],
+                dstBinding = 1,
+                dstArrayElement = 0,
+                descriptorType = .COMBINED_IMAGE_SAMPLER,
+                descriptorCount = 1,
+                pImageInfo = &image_info,
+            },
+        }
+
+        vk.UpdateDescriptorSets(
+            app.device.device,
+            u32(len(descriptor_writes)),
+            raw_data(descriptor_writes),
+            0,
+            nil,
+        )
+    }
+}
+
 vk_check :: proc(result: vk.Result, location := #caller_location) {
     if result == vk.Result.SUCCESS do return
     log.errorf("Vulkan call failed: ", result, location)
@@ -523,7 +641,8 @@ draw_frame :: proc(app: ^Application) {
         app.resized = false
         vk.DeviceWaitIdle(app.swapchain.device.device)
         destroy_swapchain(&app.swapchain)
-        app.swapchain = create_swapchain(app.swapchain.device)
+        // app.swapchain = create_swapchain(app.swapchain.device)
+        init_swapchain(&app.device, &app.swapchain)
         return
     }
 
@@ -574,53 +693,94 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 
     vk.CmdBeginRenderPass(command_buffer, &render_pass_info, vk.SubpassContents.INLINE)
 
-    vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.pipeline)
+    vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
+    {
+        extent := a.swapchain.extent
+        viewport := vk.Viewport {
+            x        = 0,
+            y        = f32(extent.height),
+            width    = cast(f32)extent.width,
+            height   = -cast(f32)extent.height,
+            minDepth = 0,
+            maxDepth = 1,
+        }
+        vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
 
-    viewport := vk.Viewport {
-        x        = 0,
-        y        = 0,
-        width    = cast(f32)a.swapchain.extent.width,
-        height   = cast(f32)a.swapchain.extent.height,
-        minDepth = 0,
-        maxDepth = 1,
+        scissor := vk.Rect2D {
+            offset = {0, 0},
+            extent = a.swapchain.extent,
+        }
+        vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+        for &model in a.scene.models {
+            buffers: []vk.Buffer = {model.vertex_buffer.handle}
+            offsets: []vk.DeviceSize = {0}
+            vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
+
+            vk.CmdBindIndexBuffer(command_buffer, model.index_buffer.handle, 0, .UINT16)
+
+            mem.copy(
+                rawptr(
+                    uintptr(a.uniform_mapped_buffers[a.swapchain.current_frame]) +
+                    uintptr(size_of(Uniform_Buffer_Object)),
+                ),
+                &model.material,
+                size_of(Material),
+            )
+            vk.CmdBindDescriptorSets(
+                command_buffer,
+                .GRAPHICS,
+                a.layout,
+                0,
+                1,
+                &a.descriptor_sets[a.swapchain.current_frame],
+                0,
+                nil,
+            )
+
+            vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
+        }
+
     }
-    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
 
-    scissor := vk.Rect2D {
-        offset = {0, 0},
-        extent = a.swapchain.extent,
-    }
-    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+    // vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.pipeline)
+    // {
+    //     extent := a.swapchain.extent
+    //     viewport := vk.Viewport {
+    //         x        = 0,
+    //         y        = f32(extent.height),
+    //         width    = cast(f32)extent.width,
+    //         height   = -cast(f32)extent.height,
+    //         minDepth = 0,
+    //         maxDepth = 1,
+    //     }
+    //     vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
 
-    for &model in a.scene.models {
-        buffers: []vk.Buffer = {model.vertex_buffer.handle}
-        offsets: []vk.DeviceSize = {0}
-        vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
+    //     scissor := vk.Rect2D {
+    //         offset = {0, 0},
+    //         extent = a.swapchain.extent,
+    //     }
+    //     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
-        vk.CmdBindIndexBuffer(command_buffer, model.index_buffer.handle, 0, .UINT16)
+    //     buffers: []vk.Buffer = {a.cubemap_buffer.handle}
+    //     offsets: []vk.DeviceSize = {0}
+    //     vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
 
-        mem.copy(
-            rawptr(
-                uintptr(a.uniform_mapped_buffers[a.swapchain.current_frame]) +
-                uintptr(size_of(Uniform_Buffer_Object)),
-            ),
-            &model.material,
-            size_of(Material),
-        )
-        vk.CmdBindDescriptorSets(
-            command_buffer,
-            .GRAPHICS,
-            a.layout,
-            0,
-            1,
-            &a.descriptor_sets[a.swapchain.current_frame],
-            0,
-            nil,
-        )
+    //     vk.CmdBindDescriptorSets(
+    //         command_buffer,
+    //         .GRAPHICS,
+    //         a.cubemap_pipeline.config.layout,
+    //         0,
+    //         1,
+    //         &a.descriptor_sets[a.swapchain.current_frame],
+    //         0,
+    //         nil,
+    //     )
 
-        vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
-    }
+    //     // vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
+    //     vk.CmdDraw(command_buffer, a.cubemap_vertex_count, 1, 0, 0)
 
+    // }
     vk.CmdEndRenderPass(command_buffer)
 
     vk_check(vk.EndCommandBuffer(command_buffer))
@@ -723,6 +883,12 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
     return
 }
 
+scene_destroy :: proc(scene: ^Scene) {
+    for &model in scene.models {
+        destroy_model(&model)
+    }
+}
+
 Material :: struct {
     albedo_color:   vec4,
     roughness:      f32,
@@ -743,11 +909,11 @@ Model :: struct {
     material:       Material,
     buffer:         Buffer,
     buffer_map:     rawptr,
-    descriptor_set: vk.DescriptorSet,
 }
 
-model_create :: proc() {
-
+destroy_model :: proc(model: ^Model) {
+    buffer_destroy(&model.vertex_buffer)
+    buffer_destroy(&model.index_buffer)
 }
 
 // model_init :: proc(model: ^Model, device: ^Device) {

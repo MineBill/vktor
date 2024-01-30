@@ -8,9 +8,6 @@ Swapchain :: struct {
     extent:                     vk.Extent2D,
     framebuffers:               [dynamic]vk.Framebuffer,
     renderpass:                 vk.RenderPass,
-    // depth_image_memories:       [dynamic]vk.DeviceMemory,
-    // depth_images:               [dynamic]vk.Image,
-    // depth_image_views:          [dynamic]vk.ImageView,
     depth_image:                Image,
     depth_image_view:           Image_View,
     swapchain_images:           [dynamic]vk.Image,
@@ -28,7 +25,7 @@ Swapchain :: struct {
     current_frame:              int,
 }
 
-create_swapchain :: proc(device: ^Device) -> (swapchain: Swapchain) {
+init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     swapchain.device = device
 
     details := query_swapchain_support(device.physical_device, device.surface)
@@ -84,11 +81,11 @@ create_swapchain :: proc(device: ^Device) -> (swapchain: Swapchain) {
         raw_data(swapchain.swapchain_images),
     )
 
-    create_image_views(&swapchain)
-    create_depth_resources(&swapchain)
-    create_render_pass(&swapchain)
-    create_framebuffers(&swapchain)
-    create_sync_objects(&swapchain)
+    create_image_views(swapchain)
+    create_depth_resources(swapchain)
+    create_render_pass(swapchain)
+    create_framebuffers(swapchain)
+    create_sync_objects(swapchain)
     return
 }
 
@@ -103,11 +100,10 @@ destroy_swapchain :: proc(using swapchain: ^Swapchain) {
     }
     delete(swapchain_image_views)
 
-    // TODO: Destroy depth stuff
+    image_view_destroy(&swapchain.depth_image_view)
+    image_destroy(&swapchain.depth_image)
 
     vk.DestroySwapchainKHR(device.device, swapchain_handle, nil)
-
-
     vk.DestroyRenderPass(device.device, renderpass, nil)
 
     destroy_semaphores(device, image_available_semaphores)
@@ -217,7 +213,7 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.MAILBOX {
+        if mode == vk.PresentModeKHR.IMMEDIATE {
             return mode
         }
     }
@@ -234,7 +230,7 @@ choose_swap_extent :: proc(
         log.debug("Choosing swap extent: ", capabilities.currentExtent)
         return capabilities.currentExtent
     } else {
-        width, height := glfw.GetFramebufferSize(device.window.handle)
+        width, height := glfw.GetFramebufferSize(device.window)
         extent.width = clamp(
             cast(u32)width,
             capabilities.minImageExtent.width,
@@ -253,34 +249,6 @@ create_image_views :: proc(using swapchain: ^Swapchain) {
     swapchain_image_views = make([dynamic]vk.ImageView, 0, len(swapchain.swapchain_images))
 
     for image in swapchain_images {
-        // create_info := vk.ImageViewCreateInfo {
-        //     sType = vk.StructureType.IMAGE_VIEW_CREATE_INFO,
-        //     format = swapchain_image_format,
-        //     image = image,
-        //     viewType = vk.ImageViewType.D2,
-        //     components = vk.ComponentMapping {
-        //         r = vk.ComponentSwizzle.IDENTITY,
-        //         g = vk.ComponentSwizzle.IDENTITY,
-        //         b = vk.ComponentSwizzle.IDENTITY,
-        //         a = vk.ComponentSwizzle.IDENTITY,
-        //     },
-        //     subresourceRange = vk.ImageSubresourceRange {
-        //         aspectMask = {vk.ImageAspectFlag.COLOR},
-        //         baseMipLevel = 0,
-        //         levelCount = 1,
-        //         baseArrayLayer = 0,
-        //         layerCount = 1,
-        //     },
-        // }
-
-        // view: vk.ImageView
-        // result := vk.CreateImageView(device.device, &create_info, nil, &view)
-        // if result != vk.Result.SUCCESS {
-        //     log.error("Failed to create image view:", result)
-        //     // @Note: Maybe return here?
-        //     continue
-        // }
-
         view := image_view_create_raw(swapchain.device, image, 1, swapchain_image_format, {.COLOR})
         append(&swapchain_image_views, view)
     }

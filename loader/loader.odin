@@ -19,10 +19,12 @@ import "core:sync"
 import "core:sys/windows"
 import "core:thread"
 import "vendor:glfw"
+import "core:time"
+import tracy "packages:odin-tracy"
 
 Symbol_Table :: struct {
-    init:     #type proc(win: ^win.Window) -> rawptr,
-    update:   #type proc(memory: rawptr) -> bool,
+    init:     #type proc(win: glfw.WindowHandle) -> rawptr,
+    update:   #type proc(memory: rawptr, delta: f64) -> bool,
     destroy:  #type proc(memory: rawptr),
     get_size: #type proc() -> int,
     reloaded: #type proc(memory: rawptr),
@@ -67,6 +69,14 @@ main :: proc() {
         opt = {.Level, .Terminal_Color},
     )
 
+    // tracy.SetThreadName("main")
+    // context.allocator = tracy.MakeProfiledAllocator(
+    //     self              = &tracy.ProfiledAllocatorData{},
+    //     callstack_size    = 5,
+    //     backing_allocator = context.allocator,
+    //     secure            = true,
+    // )
+
     symbols: Symbol_Table
     load_symbols(&symbols)
 
@@ -100,21 +110,38 @@ main :: proc() {
 
     win.initialize_windowing()
     window := win.create(640, 480, "Vulkan Window")
-    win.setup_events(&window)
 
-    mem := symbols.init(&window)
+    mem := symbols.init(window.handle)
 
+    start_time := time.now()
     main_loop: for !win.should_close(window) {
+        // defer tracy.FrameMark()
         win.update(&window)
 
         if data.should_reload {
+            // tracy.ZoneN("Hot Reload")
             data.should_reload = false
             log.info("Game reload requested. Reloading..")
+
+            new_symbols: Symbol_Table
+            // load_symbols(&new_symbols)
+            // if new_symbols.get_size() != symbols.get_size() {
+            //     symbols.destroy(mem)
+            //     mem = new_symbols.init(window.handle)
+            //     symbols = new_symbols
+            // } else {
+            //     symbols = new_symbols
+            //     symbols.reloaded(mem)
+            // }
             load_symbols(&symbols)
             symbols.reloaded(mem)
         }
 
-        quit := symbols.update(mem)
+        t := time.now()
+        delta := time.duration_seconds(time.diff(start_time, t))
+        start_time = t
+
+        quit := symbols.update(mem, delta)
         if quit do break main_loop
     }
 
