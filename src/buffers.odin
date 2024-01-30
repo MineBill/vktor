@@ -115,7 +115,7 @@ buffer_copy_to_image :: proc(source: ^Buffer, image: ^Image) {
             aspectMask = {.COLOR},
             mipLevel = 0,
             baseArrayLayer = 0,
-            layerCount = 1,
+            layerCount = image.layer_count,
         },
 
         imageOffset = {0, 0, 0},

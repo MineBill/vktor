@@ -12,6 +12,6 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec3 fragTexCoord;
 
 void main() {
-    gl_Position = view_data.proj * view_data.view * vec4(inPosition, 1.0);
+    gl_Position = view_data.proj * vec4(inPosition, 1.0);
     fragTexCoord = inPosition;
 }

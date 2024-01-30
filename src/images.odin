@@ -5,6 +5,7 @@ import "core:log"
 import stb "vendor:stb/image"
 import "core:os"
 import "core:math"
+import "core:mem"
 
 Image :: struct {
     device:         ^Device,
@@ -14,6 +15,7 @@ Image :: struct {
     format:         vk.Format,
     mip_levels:     u32,
     sampler:        vk.Sampler,
+    layer_count:    u32,
 }
 
 Image_View :: struct {
@@ -61,15 +63,62 @@ image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.Ima
     // transition_image_layout(&image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
 
     image_generate_mipmaps(&image)
-
-    image.sampler = image_sampler_create(image.device, image.mip_levels)
     return
 }
 
 cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) -> (image: Image) {
-    for file in file_names {
+    texture_data: [6][^]byte
 
+    last_width, last_height, channels: i32
+    for file, i in file_names {
+        data, ok := os.read_entire_file(file)
+        if !ok {
+            log.errorf("Failed to open '%v'", file)
+            return
+        }
+        defer delete(data)
+
+        texture_data[i] = stb.load_from_memory(raw_data(data), i32(len(data)), &last_width, &last_height, &channels, 4)
     }
+
+    CHANNELS :: 4
+    LAYERS :: 6
+    layer_size := last_width * last_height * CHANNELS
+    total_size := layer_size * LAYERS
+
+    staging := buffer_create(
+        device,
+        u32(total_size),
+        {.TRANSFER_SRC},
+        {.HOST_VISIBLE, .HOST_COHERENT})
+    defer buffer_destroy(&staging)
+
+    data: rawptr
+
+    vk.MapMemory(device.device, staging.memory, 0, vk.DeviceSize(total_size), {}, &data)
+    for i in 0..<LAYERS {
+        // buffer_copy_data(&staging, texture_data[i][:layer_size])
+        mem.copy(
+            rawptr(uintptr(data) + uintptr(i32(i) * layer_size)),
+            texture_data[i],
+            int(layer_size))
+    }
+    vk.UnmapMemory(device.device, staging.memory)
+
+    mip_levels := cast(u32)math.floor(math.log2(cast(f32)max(last_width, last_height))) + 1
+    image = image_create(
+        device, 
+        u32(last_width), u32(last_height),
+        mip_levels,
+        .R8G8B8A8_SRGB,
+        .OPTIMAL,
+        {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
+        {.CUBE_COMPATIBLE}, layer_count = 6)
+
+    transition_image_layout(&image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    buffer_copy_to_image(&staging, &image)
+
+    image_generate_mipmaps(&image, LAYERS)
 
     return
 }
@@ -82,12 +131,14 @@ image_create :: proc(
     tiling: vk.ImageTiling,
     usage: vk.ImageUsageFlags,
     flags := vk.ImageCreateFlags{},
+    layer_count: u32 = 1,
 ) -> (image: Image) {
     image.device = device
     image.mip_levels = mip_levels
     image.format = format
     image.width  = width
     image.height = height
+    image.layer_count = layer_count
 
     image_info := vk.ImageCreateInfo {
         sType = .IMAGE_CREATE_INFO,
@@ -98,7 +149,7 @@ image_create :: proc(
             1,
         },
         mipLevels = mip_levels,
-        arrayLayers = 1,
+        arrayLayers = layer_count,
         format = format,
         tiling = tiling,
         initialLayout = .UNDEFINED,
@@ -155,7 +206,7 @@ transition_image_layout :: proc(image: ^Image, format: vk.Format, old_layout, ne
             baseMipLevel = 0,
             levelCount = image.mip_levels,
             baseArrayLayer = 0,
-            layerCount = 1,
+            layerCount = image.layer_count,
         },
     }
 
@@ -183,7 +234,7 @@ transition_image_layout :: proc(image: ^Image, format: vk.Format, old_layout, ne
         1, &barrier)
 }
 
-image_generate_mipmaps :: proc(image: ^Image) {
+image_generate_mipmaps :: proc(image: ^Image, layer_count: u32 = 1) {
     cmd := begin_single_time_command(image.device)
     defer end_single_time_command(image.device, cmd)
 
@@ -195,7 +246,7 @@ image_generate_mipmaps :: proc(image: ^Image) {
         subresourceRange = vk.ImageSubresourceRange {
             aspectMask = {.COLOR},
             baseArrayLayer = 0,
-            layerCount = 1,
+            layerCount = layer_count,
             levelCount  = 1,
         },
     }
@@ -204,7 +255,7 @@ image_generate_mipmaps :: proc(image: ^Image) {
     height := i32(image.height)
 
     for i in 1 ..< image.mip_levels {
-        // log.debugf("Generating mip level %v", i)
+        log.debugf("Generating mip level %v", i)
         barrier.subresourceRange.baseMipLevel = i - 1
         barrier.oldLayout = .TRANSFER_DST_OPTIMAL
         barrier.newLayout = .TRANSFER_SRC_OPTIMAL
@@ -259,31 +310,55 @@ image_generate_mipmaps :: proc(image: ^Image) {
     barrier.dstAccessMask = {.SHADER_READ}
 
     vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
-}
 
-generate_image_mipmaps :: proc() {
+    image.sampler = image_sampler_create(image.device, image.mip_levels)
 }
 
 // Takes and returns custom wrappers over the vk objects.
 image_view_create :: proc(image: ^Image, format: vk.Format, aspect: vk.ImageAspectFlags) -> (view: Image_View) {
     view.image = image
-    view.handle = image_view_create_raw(image.device, image.handle, image.mip_levels, format, aspect)
+    view.handle = image_view_create_raw(
+        image.device,
+        image.handle,
+        image.mip_levels,
+        format,
+        aspect, .D2)
+    return
+}
+
+cubemap_image_view_create :: proc(image: ^Image, aspect: vk.ImageAspectFlags) -> (view: Image_View) {
+    view.image = image
+    view.handle = image_view_create_raw(
+        image.device,
+        image.handle,
+        image.mip_levels,
+        image.format,
+        aspect, .CUBE, 6)
+
     return
 }
 
 // Takes and returns raw Vulkan objects.
-image_view_create_raw :: proc(device: ^Device, image: vk.Image, mip_levels: u32, format: vk.Format, aspect: vk.ImageAspectFlags) -> (view: vk.ImageView) {
+image_view_create_raw :: proc(
+    device: ^Device,
+    image: vk.Image,
+    mip_levels: u32,
+    format: vk.Format,
+    aspect: vk.ImageAspectFlags,
+    view_type: vk.ImageViewType,
+    layer_count: u32 = 1,
+) -> (view: vk.ImageView) {
     view_info := vk.ImageViewCreateInfo {
         sType = .IMAGE_VIEW_CREATE_INFO,
         image = image,
-        viewType = .D2,
+        viewType = view_type,
         format = format,
         subresourceRange = vk.ImageSubresourceRange {
             aspectMask = aspect,
             baseMipLevel = 0,
             levelCount = mip_levels,
             baseArrayLayer = 0,
-            layerCount = 1,
+            layerCount = layer_count,
         },
     }
 

@@ -249,7 +249,7 @@ create_image_views :: proc(using swapchain: ^Swapchain) {
     swapchain_image_views = make([dynamic]vk.ImageView, 0, len(swapchain.swapchain_images))
 
     for image in swapchain_images {
-        view := image_view_create_raw(swapchain.device, image, 1, swapchain_image_format, {.COLOR})
+        view := image_view_create_raw(swapchain.device, image, 1, swapchain_image_format, {.COLOR}, .D2)
         append(&swapchain_image_views, view)
     }
     log.debug("Created %v image views", len(swapchain_image_views))

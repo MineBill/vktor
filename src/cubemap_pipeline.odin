@@ -1,5 +1,6 @@
 package main
 import vk "vendor:vulkan"
+import "core:log"
 
 Cubemap_Side :: enum {
     Front,
@@ -12,6 +13,7 @@ Cubemap_Side :: enum {
 
 Cubemap_Pipeline :: struct {
     using pipeline:     Pipeline,
+    swapchain:          ^Swapchain,
 
     pipeline_layout:    vk.PipelineLayout,
     descriptor_sets:    []vk.DescriptorSet,
@@ -19,35 +21,67 @@ Cubemap_Pipeline :: struct {
     descriptor_pool:    vk.DescriptorPool,
 
     uniform_buffers:        []Buffer,
-    uniform_mpipelineed_buffers: []rawptr,
+    uniform_mapped_buffers: []rawptr,
 
     buffer:             Buffer,
     vertex_count:       u32,
-    images:             [Cubemap_Side]Image,
-    image_views:        [Cubemap_Side]Image_View,
+    // images:             [Cubemap_Side]Image,
+    // image_views:        [Cubemap_Side]Image_View,
+    image:              Image,
     image_view:         Image_View,
 }
 
 cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^Swapchain) {
-    pipeline^ = create_cubemap_pipeline(device, swapchain)
+    pipeline.device = device
+    pipeline.swapchain = swapchain
 
-    pipeline.images[.Front] = image_load_from_file(device, "assets/textures/skybox/front.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.Front] = image_view_create(&pipeline.images[.Front], .R8G8B8A8_SRGB, {.COLOR})
+    pipeline.descriptor_layout = create_cubemap_pipeline_descriptor_set_layout(pipeline.device)
 
-    pipeline.images[.Back] = image_load_from_file(device, "assets/textures/skybox/back.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.Back] = image_view_create(&pipeline.images[.Back], .R8G8B8A8_SRGB, {.COLOR})
+    pipeline.descriptor_pool = device_create_descriptor_pool(pipeline.device, MAX_FRAMES_IN_FLIGHT, {
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+    })
 
-    pipeline.images[.Up] = image_load_from_file(device, "assets/textures/skybox/top.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.Up] = image_view_create(&pipeline.images[.Up], .R8G8B8A8_SRGB, {.COLOR})
+    pipeline.descriptor_sets = device_allocate_descriptor_sets(
+        pipeline.device,
+        pipeline.descriptor_pool,
+        MAX_FRAMES_IN_FLIGHT,
+        pipeline.descriptor_layout,
+    )
+    crete_cubemap_pipeline_layout(pipeline)
+    create_cubemap_pipeline(pipeline)
 
-    pipeline.images[.Down] = image_load_from_file(device, "assets/textures/skybox/bottom.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.Down] = image_view_create(&pipeline.images[.Down], .R8G8B8A8_SRGB, {.COLOR})
+    file_names := [6]string {
+        "assets/textures/skybox/front.jpg",
+        "assets/textures/skybox/back.jpg",
+        "assets/textures/skybox/top.jpg",
+        "assets/textures/skybox/bottom.jpg",
+        "assets/textures/skybox/right.jpg",
+        "assets/textures/skybox/left.jpg",
+    }
 
-    pipeline.images[.Right] = image_load_from_file(device, "assets/textures/skybox/right.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.right] = image_view_create(&pipeline.images[.right], .r8g8b8a8_srgb, {.color})
+    pipeline.image = cubemap_image_load_from_files(device, file_names)
+    pipeline.image_view = cubemap_image_view_create(&pipeline.image, {.COLOR})
 
-    pipeline.images[.Left] = image_load_from_file(device, "assets/textures/skybox/left.jpg", {.CUBE_COMPATIBLE})
-    // pipeline.image_views[.Left] = image_view_create(&pipeline.images[.Left], .R8G8B8A8_SRGB, {.COLOR})
+    log.debugf("%v", pipeline.image.sampler)
+
+    // pipeline.images[.Front] = image_load_from_file(device, "assets/textures/skybox/front.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.Front] = image_view_create(&pipeline.images[.Front], .R8G8B8A8_SRGB, {.COLOR})
+
+    // pipeline.images[.Back] = image_load_from_file(device, "assets/textures/skybox/back.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.Back] = image_view_create(&pipeline.images[.Back], .R8G8B8A8_SRGB, {.COLOR})
+
+    // pipeline.images[.Up] = image_load_from_file(device, "assets/textures/skybox/top.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.Up] = image_view_create(&pipeline.images[.Up], .R8G8B8A8_SRGB, {.COLOR})
+
+    // pipeline.images[.Down] = image_load_from_file(device, "assets/textures/skybox/bottom.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.Down] = image_view_create(&pipeline.images[.Down], .R8G8B8A8_SRGB, {.COLOR})
+
+    // pipeline.images[.Right] = image_load_from_file(device, "assets/textures/skybox/right.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.right] = image_view_create(&pipeline.images[.right], .r8g8b8a8_srgb, {.color})
+
+    // pipeline.images[.Left] = image_load_from_file(device, "assets/textures/skybox/left.jpg", {.CUBE_COMPATIBLE})
+    // // pipeline.image_views[.Left] = image_view_create(&pipeline.images[.Left], .R8G8B8A8_SRGB, {.COLOR})
 
     vertices := []Simple_Vertext{
         {{-1.0,  1.0, -1.0,}},
@@ -56,35 +90,30 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
         {{ 1.0, -1.0, -1.0,}},
         {{ 1.0,  1.0, -1.0,}},
         {{-1.0,  1.0, -1.0,}},
-        {{                 }},
         {{-1.0, -1.0,  1.0,}},
         {{-1.0, -1.0, -1.0,}},
         {{-1.0,  1.0, -1.0,}},
         {{-1.0,  1.0, -1.0,}},
         {{-1.0,  1.0,  1.0,}},
         {{-1.0, -1.0,  1.0,}},
-        {{                 }},
         {{ 1.0, -1.0, -1.0,}},
         {{ 1.0, -1.0,  1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{ 1.0,  1.0, -1.0,}},
         {{ 1.0, -1.0, -1.0,}},
-        {{                 }},
         {{-1.0, -1.0,  1.0,}},
         {{-1.0,  1.0,  1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{ 1.0, -1.0,  1.0,}},
         {{-1.0, -1.0,  1.0,}},
-        {{                 }},
         {{-1.0,  1.0, -1.0,}},
         {{ 1.0,  1.0, -1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{ 1.0,  1.0,  1.0,}},
         {{-1.0,  1.0,  1.0,}},
         {{-1.0,  1.0, -1.0,}},
-        {{                 }},
         {{-1.0, -1.0, -1.0,}},
         {{-1.0, -1.0,  1.0,}},
         {{ 1.0, -1.0, -1.0,}},
@@ -95,39 +124,96 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
 
     pipeline.buffer = create_vertex_buffer(device, vertices)
     pipeline.vertex_count = u32(len(vertices))
+
+    create_cubemap_uniform_buffers(pipeline)
 }
 
-create_cubemap_pipeline :: proc(device: ^Device, swapchain: ^Swapchain) -> (pipeline: Cubemap_Pipeline) {
-    pipeline.device = device
+create_cubemap_uniform_buffers :: proc(pipeline: ^Cubemap_Pipeline) {
+    pipeline.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
+    pipeline.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
 
-    config := default_pipeline_config()
-    config.renderpass = swapchain.renderpass
-    
-    config.descriptor_set_layout = create_cubemap_pipeline_descriptor_set_layout(device)
+    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+        size := u32(size_of(Uniform_Buffer_Object))
+        pipeline.uniform_buffers[i] = buffer_create(
+            pipeline.device,
+            size,
+            {.UNIFORM_BUFFER},
+            {.HOST_VISIBLE, .HOST_COHERENT},
+        )
 
+        vk.MapMemory(
+            pipeline.device.device,
+            pipeline.uniform_buffers[i].memory,
+            0,
+            vk.DeviceSize(size),
+            {},
+            &pipeline.uniform_mapped_buffers[i],
+        )
+
+        buffer_info := vk.DescriptorBufferInfo {
+            buffer = pipeline.uniform_buffers[i].handle,
+            offset = 0,
+            range  = size_of(Uniform_Buffer_Object),
+        }
+
+        image_info := vk.DescriptorImageInfo {
+            imageLayout = .READ_ONLY_OPTIMAL,
+            imageView   = pipeline.image_view.handle,
+            sampler     = pipeline.image.sampler,
+        }
+
+        descriptor_writes := []vk.WriteDescriptorSet {
+             {
+                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+                dstSet = pipeline.descriptor_sets[i],
+                dstBinding = 0,
+                dstArrayElement = 0,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &buffer_info,
+            },
+             {
+                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+                dstSet = pipeline.descriptor_sets[i],
+                dstBinding = 1,
+                dstArrayElement = 0,
+                descriptorType = .COMBINED_IMAGE_SAMPLER,
+                descriptorCount = 1,
+                pImageInfo = &image_info,
+            },
+        }
+
+        vk.UpdateDescriptorSets(
+            pipeline.device.device,
+            u32(len(descriptor_writes)),
+            raw_data(descriptor_writes),
+            0,
+            nil,
+        )
+    }
+}
+
+crete_cubemap_pipeline_layout :: proc(pipeline: ^Cubemap_Pipeline) {
     pipeline_layout_create_info := vk.PipelineLayoutCreateInfo {
         sType                  = vk.StructureType.PIPELINE_LAYOUT_CREATE_INFO,
         pushConstantRangeCount = 0,
         setLayoutCount         = 1,
-        pSetLayouts            = &config.descriptor_set_layout,
+        pSetLayouts            = &pipeline.descriptor_layout,
     }
 
-    vk_check(vk.CreatePipelineLayout(device.device, &pipeline_layout_create_info, nil, &config.layout))
-    
-    pipeline.descriptor_pool = device_create_descriptor_pool(device, MAX_FRAMES_IN_FLIGHT, {
-        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
-        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
-    })
+    vk_check(vk.CreatePipelineLayout(pipeline.device.device, &pipeline_layout_create_info, nil, &pipeline.pipeline_layout))
+}
 
-    pipeline.descriptor_sets = device_allocate_descriptor_sets(
-        device,
-        pipeline.descriptor_pool,
-        MAX_FRAMES_IN_FLIGHT,
-        pipeline.descriptor_layout,
-    )
+create_cubemap_pipeline :: proc(pipeline: ^Cubemap_Pipeline) {
+    config := default_pipeline_config()
+    config.renderpass = pipeline.swapchain.renderpass
+    config.layout = pipeline.pipeline_layout
+    config.descriptor_set_layout = pipeline.descriptor_layout
+
+    // log.debugf("len(descriptor_sets): %v", len(pipeline.descriptor_sets))
 
     pipeline.shader = create_shader(
-        device,
+        pipeline.device,
         "bin/assets/shaders/Builtin.Cubemap.spv",
     )
     // pipeline.shader.pipeline = &pipeline
@@ -191,7 +277,7 @@ create_cubemap_pipeline :: proc(device: ^Device, swapchain: ^Swapchain) -> (pipe
     depth_stencil_create_info := vk.PipelineDepthStencilStateCreateInfo {
         sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         depthTestEnable       = true,
-        depthWriteEnable      = true,
+        depthWriteEnable      = false,
         depthCompareOp        = .LESS,
         depthBoundsTestEnable = false,
         stencilTestEnable     = false,
@@ -217,7 +303,7 @@ create_cubemap_pipeline :: proc(device: ^Device, swapchain: ^Swapchain) -> (pipe
     }
 
     vk_check(vk.CreateGraphicsPipelines(
-        device.device,
+        pipeline.device.device,
         0,
         1,
         &pipeline_create_info,
@@ -226,71 +312,6 @@ create_cubemap_pipeline :: proc(device: ^Device, swapchain: ^Swapchain) -> (pipe
     ))
     pipeline.config = config
     return
-}
-
-create_cubmap_uniform_buffers :: proc(pipeline: ^Cubemap_Pipeline) {
-    pipeline.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
-    pipeline.uniform_mpipelineed_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
-
-    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-        size := u32(size_of(Uniform_Buffer_Object))
-        pipeline.uniform_buffers[i] = buffer_create(
-            pipeline.device,
-            size,
-            {.UNIFORM_BUFFER},
-            {.HOST_VISIBLE, .HOST_COHERENT},
-        )
-
-        vk.MapMemory(
-            pipeline.device.device,
-            pipeline.uniform_buffers[i].memory,
-            0,
-            vk.DeviceSize(size),
-            {},
-            &pipeline.uniform_mpipelineed_buffers[i],
-        )
-
-        buffer_info := vk.DescriptorBufferInfo {
-            buffer = pipeline.uniform_buffers[i].handle,
-            offset = 0,
-            range  = size_of(Uniform_Buffer_Object),
-        }
-
-        image_info := vk.DescriptorImageInfo {
-            imageLayout = .READ_ONLY_OPTIMAL,
-            imageView   = pipeline.image_view.handle,
-            sampler     = pipeline.image_view.image.sampler,
-        }
-
-        descriptor_writes := []vk.WriteDescriptorSet {
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = pipeline.descriptor_sets[i],
-                dstBinding = 0,
-                dstArrayElement = 0,
-                descriptorType = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo = &buffer_info,
-            },
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = pipeline.descriptor_sets[i],
-                dstBinding = 1,
-                dstArrayElement = 0,
-                descriptorType = .COMBINED_IMAGE_SAMPLER,
-                descriptorCount = 1,
-                pImageInfo = &image_info,
-            },
-        }
-
-        vk.UpdateDescriptorSets(
-            pipeline.device.device,
-            u32(len(descriptor_writes)),
-            raw_data(descriptor_writes),
-            0,
-            nil,
-        )
-    }
 }
 
 create_cubemap_pipeline_descriptor_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSetLayout) {

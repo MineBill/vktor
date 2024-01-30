@@ -93,6 +93,8 @@ Application :: struct {
     thread_data:            ^Thread_Data,
     thread:                 ^thread.Thread,
 
+    cubemap_pipeline:       Cubemap_Pipeline,
+
     scene_data:             Scene_Data,
     event_context:          Event_Context,
     mouse_locked:           bool,
@@ -150,6 +152,9 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
         app.layout,
         app.descriptor_layout,
     )
+
+    cubemap_init(&app.cubemap_pipeline, &app.device, &app.swapchain)
+
     app.command_buffers = create_command_buffers(&app.device, MAX_FRAMES_IN_FLIGHT)
 
     // app.vertices = []Vertex {
@@ -290,6 +295,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
             app.layout,
             app.descriptor_layout,
         )
+        create_cubemap_pipeline(&app.cubemap_pipeline)
         app.thread_data.should_reload = false
     }
 
@@ -391,6 +397,7 @@ update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
         100.0,
     )
     mem.copy(app.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
+    mem.copy(app.cubemap_pipeline.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))
 }
 
 create_uniform_buffers :: proc(app: ^Application) {
@@ -437,15 +444,6 @@ create_uniform_buffers :: proc(app: ^Application) {
              {
                 sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
                 dstSet = app.descriptor_sets[i],
-                dstBinding = 0,
-                dstArrayElement = 0,
-                descriptorType = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo = &buffer_info,
-            },
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = app.cubemap_descriptor_sets[i],
                 dstBinding = 0,
                 dstArrayElement = 0,
                 descriptorType = .UNIFORM_BUFFER,
@@ -563,74 +561,10 @@ create_pipeline :: proc(
     return
 }
 
-create_cubmap_uniform_buffers :: proc(app: ^Application) {
-    app.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
-    app.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
-
-    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-        size := u32(size_of(Uniform_Buffer_Object))
-        app.uniform_buffers[i] = buffer_create(
-            &app.device,
-            size,
-            {.UNIFORM_BUFFER},
-            {.HOST_VISIBLE, .HOST_COHERENT},
-        )
-
-        vk.MapMemory(
-            app.device.device,
-            app.uniform_buffers[i].memory,
-            0,
-            vk.DeviceSize(size),
-            {},
-            &app.uniform_mapped_buffers[i],
-        )
-
-        buffer_info := vk.DescriptorBufferInfo {
-            buffer = app.uniform_buffers[i].handle,
-            offset = 0,
-            range  = size_of(Uniform_Buffer_Object),
-        }
-
-        image_info := vk.DescriptorImageInfo {
-            imageLayout = .READ_ONLY_OPTIMAL,
-            imageView   = app.image_view.handle,
-            sampler     = app.image_view.image.sampler,
-        }
-
-        descriptor_writes := []vk.WriteDescriptorSet {
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = app.cubemap_descriptor_sets[i],
-                dstBinding = 0,
-                dstArrayElement = 0,
-                descriptorType = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo = &buffer_info,
-            },
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = app.cubemap_descriptor_sets[i],
-                dstBinding = 1,
-                dstArrayElement = 0,
-                descriptorType = .COMBINED_IMAGE_SAMPLER,
-                descriptorCount = 1,
-                pImageInfo = &image_info,
-            },
-        }
-
-        vk.UpdateDescriptorSets(
-            app.device.device,
-            u32(len(descriptor_writes)),
-            raw_data(descriptor_writes),
-            0,
-            nil,
-        )
-    }
-}
 
 vk_check :: proc(result: vk.Result, location := #caller_location) {
     if result == vk.Result.SUCCESS do return
-    log.errorf("Vulkan call failed: ", result, location)
+    log.errorf("Vulkan call failed: %v %v", result, location, location = location)
 }
 
 draw_frame :: proc(app: ^Application) {
@@ -692,26 +626,48 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     }
 
     vk.CmdBeginRenderPass(command_buffer, &render_pass_info, vk.SubpassContents.INLINE)
+    extent := a.swapchain.extent
+    viewport := vk.Viewport {
+        x        = 0,
+        y        = f32(extent.height),
+        width    = cast(f32)extent.width,
+        height   = -cast(f32)extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+
+    scissor := vk.Rect2D {
+        offset = {0, 0},
+        extent = a.swapchain.extent,
+    }
+    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+    vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.handle)
+    {
+
+        buffers: []vk.Buffer = {a.cubemap_pipeline.buffer.handle}
+        offsets: []vk.DeviceSize = {0}
+        vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
+
+        vk.CmdBindDescriptorSets(
+            command_buffer,
+            .GRAPHICS,
+            a.cubemap_pipeline.pipeline_layout,
+            0,
+            1,
+            &a.cubemap_pipeline.descriptor_sets[a.swapchain.current_frame],
+            0,
+            nil,
+        )
+
+        // vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
+        vk.CmdDraw(command_buffer, a.cubemap_pipeline.vertex_count, 1, 0, 0)
+
+    }
 
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
     {
-        extent := a.swapchain.extent
-        viewport := vk.Viewport {
-            x        = 0,
-            y        = f32(extent.height),
-            width    = cast(f32)extent.width,
-            height   = -cast(f32)extent.height,
-            minDepth = 0,
-            maxDepth = 1,
-        }
-        vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-
-        scissor := vk.Rect2D {
-            offset = {0, 0},
-            extent = a.swapchain.extent,
-        }
-        vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
         for &model in a.scene.models {
             buffers: []vk.Buffer = {model.vertex_buffer.handle}
             offsets: []vk.DeviceSize = {0}
@@ -743,44 +699,6 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 
     }
 
-    // vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.pipeline)
-    // {
-    //     extent := a.swapchain.extent
-    //     viewport := vk.Viewport {
-    //         x        = 0,
-    //         y        = f32(extent.height),
-    //         width    = cast(f32)extent.width,
-    //         height   = -cast(f32)extent.height,
-    //         minDepth = 0,
-    //         maxDepth = 1,
-    //     }
-    //     vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-
-    //     scissor := vk.Rect2D {
-    //         offset = {0, 0},
-    //         extent = a.swapchain.extent,
-    //     }
-    //     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
-    //     buffers: []vk.Buffer = {a.cubemap_buffer.handle}
-    //     offsets: []vk.DeviceSize = {0}
-    //     vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
-
-    //     vk.CmdBindDescriptorSets(
-    //         command_buffer,
-    //         .GRAPHICS,
-    //         a.cubemap_pipeline.config.layout,
-    //         0,
-    //         1,
-    //         &a.descriptor_sets[a.swapchain.current_frame],
-    //         0,
-    //         nil,
-    //     )
-
-    //     // vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
-    //     vk.CmdDraw(command_buffer, a.cubemap_vertex_count, 1, 0, 0)
-
-    // }
     vk.CmdEndRenderPass(command_buffer)
 
     vk_check(vk.EndCommandBuffer(command_buffer))
