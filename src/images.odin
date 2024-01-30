@@ -58,7 +58,7 @@ image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.Ima
         {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
         flags)
 
-    transition_image_layout(&image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     buffer_copy_to_image(&staging, &image)
     // transition_image_layout(&image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
 
@@ -115,7 +115,7 @@ cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) ->
         {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
         {.CUBE_COMPATIBLE}, layer_count = 6)
 
-    transition_image_layout(&image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     buffer_copy_to_image(&staging, &image)
 
     image_generate_mipmaps(&image, LAYERS)
@@ -184,13 +184,17 @@ image_destroy :: proc(image: ^Image) {
     vk.DestroyImage(image.device.device, image.handle, nil)
 }
 
+image_transition_layout :: proc(image: ^Image, old_layout, new_layout: vk.ImageLayout) {
+    transition_image_layout(image.device, image.handle, image.mip_levels, image.layer_count, old_layout, new_layout)
+}
+
 image_set_lod_bias :: proc(image: ^Image, bias: f32) {
     image.sampler = image_sampler_create(image.device, image.mip_levels, bias)
 }
 
-transition_image_layout :: proc(image: ^Image, format: vk.Format, old_layout, new_layout: vk.ImageLayout) {
-    cmd := begin_single_time_command(image.device)
-    defer end_single_time_command(image.device, cmd)
+transition_image_layout :: proc(device: ^Device, image: vk.Image, mip_levels: u32, layer_count: u32, old_layout, new_layout: vk.ImageLayout) {
+    cmd := begin_single_time_command(device)
+    defer end_single_time_command(device, cmd)
 
     barrier := vk.ImageMemoryBarrier {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -200,13 +204,13 @@ transition_image_layout :: proc(image: ^Image, format: vk.Format, old_layout, ne
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 
-        image = image.handle,
+        image = image,
         subresourceRange = vk.ImageSubresourceRange {
             aspectMask = {.COLOR},
             baseMipLevel = 0,
-            levelCount = image.mip_levels,
+            levelCount = mip_levels,
             baseArrayLayer = 0,
-            layerCount = image.layer_count,
+            layerCount = layer_count,
         },
     }
 
@@ -223,6 +227,24 @@ transition_image_layout :: proc(image: ^Image, format: vk.Format, old_layout, ne
 
         source_stage = {.TRANSFER}
         dest_stage = {.FRAGMENT_SHADER}
+    } else if old_layout == .PRESENT_SRC_KHR && new_layout == .TRANSFER_SRC_OPTIMAL {
+        barrier.srcAccessMask = {.MEMORY_READ}
+        barrier.dstAccessMask = {.TRANSFER_READ}
+
+        source_stage = {.TRANSFER}
+        dest_stage = {.TRANSFER}
+    } else if old_layout == .TRANSFER_SRC_OPTIMAL && new_layout  == .PRESENT_SRC_KHR {
+        barrier.srcAccessMask = {.TRANSFER_READ}
+        barrier.dstAccessMask = {.MEMORY_READ}
+
+        source_stage = {.TRANSFER}
+        dest_stage = {.TRANSFER}
+    } else if old_layout == .TRANSFER_DST_OPTIMAL && new_layout == .GENERAL {
+        barrier.srcAccessMask = {.TRANSFER_WRITE}
+        barrier.dstAccessMask = {.MEMORY_READ}
+
+        source_stage = {.TRANSFER}
+        dest_stage = {.TRANSFER}
     }
 
     vk.CmdPipelineBarrier(

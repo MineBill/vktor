@@ -14,6 +14,8 @@ import "vendor:glfw"
 import vk "vendor:vulkan"
 // import "core:sys/windows"
 import "core:thread"
+import "core:image/png"
+import stbi "vendor:stb/image"
 // import tracy "packages:odin-tracy"
 
 VALIDATION :: #config(VALIDATION, false)
@@ -270,6 +272,10 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
                 }
             }
 
+            if a.key == .f3 && a.state == .pressed {
+                save_screenshot(app)
+            }
+
         case WindowResizedEvent:
             if a.size.x == 0 || a.size.y == 0 {
                 app.minimized = true
@@ -377,6 +383,106 @@ destroy :: proc(mem: rawptr) {
 
 @(export)
 get_size :: proc() -> int { return size_of(Application) }
+
+save_screenshot :: proc(app: ^Application) {
+    supports_blit := true
+
+    format_properties: vk.FormatProperties
+    vk.GetPhysicalDeviceFormatProperties(app.device.physical_device, app.swapchain.color_format, &format_properties)
+    if .BLIT_SRC not_in format_properties.optimalTilingFeatures {
+        log.infof("Device does not support blitting from optiomal tiled images")
+        supports_blit = false
+    }
+
+    vk.GetPhysicalDeviceFormatProperties(app.device.physical_device, .R8G8B8A8_UNORM, &format_properties)
+    if .BLIT_DST not_in format_properties.optimalTilingFeatures {
+        log.infof("Device does not support blitting to linear tiled images")
+        supports_blit = false
+    }
+
+    if !supports_blit {
+        return
+    }
+
+    source_image := app.swapchain.swapchain_images[app.swapchain.current_frame]
+
+    extent := app.swapchain.extent
+    image := image_create(
+        &app.device,
+        extent.width, extent.height,
+        1,
+        .R8G8B8A8_UNORM,
+        .LINEAR,
+        {.TRANSFER_DST},
+    )
+    image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+
+    transition_image_layout(&app.device, source_image, 1, 1, .PRESENT_SRC_KHR, .TRANSFER_SRC_OPTIMAL)
+
+    blit_size := vk.Offset3D {
+        x = i32(extent.width),
+        y = i32(extent.height),
+        z = 1,
+    }
+
+    blit_region := vk.ImageBlit {
+        srcSubresource = vk.ImageSubresourceLayers {
+            aspectMask = {.COLOR},
+            layerCount = 1,
+        },
+        dstSubresource = vk.ImageSubresourceLayers {
+            aspectMask = {.COLOR},
+            layerCount = 1,
+        },
+    }
+    blit_region.srcOffsets[1] = blit_size
+    blit_region.dstOffsets[1] = blit_size
+
+    cmd := begin_single_time_command(&app.device)
+    vk.CmdBlitImage(cmd, source_image, .TRANSFER_SRC_OPTIMAL, image.handle, .TRANSFER_DST_OPTIMAL, 1, &blit_region, .LINEAR)
+    end_single_time_command(&app.device, cmd)
+
+
+    image_transition_layout(&image, .TRANSFER_DST_OPTIMAL, .GENERAL)
+    transition_image_layout(&app.device, source_image, 1, 1, .TRANSFER_SRC_OPTIMAL, .PRESENT_SRC_KHR)
+
+    subresource := vk.ImageSubresource {
+        aspectMask = {.COLOR},
+        mipLevel = 0,
+        arrayLayer = 0,
+    }
+    subresource_layout: vk.SubresourceLayout
+    vk.GetImageSubresourceLayout(app.device.device, image.handle, &subresource, &subresource_layout)
+
+    data: rawptr
+    vk.MapMemory(app.device.device, image.memory, 0, vk.DeviceSize(vk.WHOLE_SIZE), {}, &data)
+    data = rawptr(uintptr(data) + uintptr(subresource_layout.offset))
+
+    _screenshot_saver :: proc(data: rawptr) {
+        work_data := cast(^Work_Data)data
+
+        stbi.write_png("screenshots/test.png", i32(work_data.width), i32(work_data.height), 4, work_data.data, work_data.stride)
+
+        log.info("Finished")
+
+        mem.free(work_data.data)
+        free(work_data)
+    }
+
+    Work_Data :: struct {
+        data: rawptr,
+        width, height: i32,
+        stride: i32,
+    }
+    work_data := new(Work_Data)
+    work_data.data, _ = mem.alloc(int(subresource_layout.size))
+    mem.copy(work_data.data, data, int(subresource_layout.size))
+    work_data.width = i32(extent.width)
+    work_data.height = i32(extent.height)
+    work_data.stride = i32(subresource_layout.rowPitch)
+
+    thread.run_with_data(work_data, _screenshot_saver)
+}
 
 update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
     ubo := Uniform_Buffer_Object{}

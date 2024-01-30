@@ -23,6 +23,8 @@ Swapchain :: struct {
     // render_finished_semaphore:  vk.Semaphore,
     // in_flight_fence:            vk.Fence,
     current_frame:              int,
+
+    color_format:               vk.Format,
 }
 
 init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
@@ -33,6 +35,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
 
     present_mode := choose_swap_present_mode(details.present_modes)
     surface_format := choose_swap_surface_format(details.formats)
+    swapchain.color_format = surface_format.format
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 
@@ -50,7 +53,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
         presentMode = present_mode,
         imageExtent = swapchain.extent,
         imageArrayLayers = 1,
-        imageUsage = {vk.ImageUsageFlag.COLOR_ATTACHMENT},
+        imageUsage = {vk.ImageUsageFlag.COLOR_ATTACHMENT, .TRANSFER_SRC},
         imageSharingMode = vk.SharingMode.EXCLUSIVE,
         preTransform = details.capabilities.currentTransform,
         compositeAlpha = {vk.CompositeAlphaFlagKHR.OPAQUE},
