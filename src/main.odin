@@ -16,6 +16,7 @@ import vk "vendor:vulkan"
 import "core:thread"
 import "core:image/png"
 import stbi "vendor:stb/image"
+import "../monitor"
 // import tracy "packages:odin-tracy"
 
 VALIDATION :: #config(VALIDATION, false)
@@ -65,12 +66,6 @@ Camera :: struct {
     fov:            f32,
 }
 
-Thread_Data :: struct {
-    paths:         []string,
-    handle:        rawptr,
-    should_reload: bool,
-}
-
 Application :: struct {
     window:                 glfw.WindowHandle,
     start_time:             time.Time,
@@ -92,7 +87,7 @@ Application :: struct {
     scene:                  Scene,
     odin_context:           runtime.Context,
     dbg_context:            ^Debug_Context,
-    thread_data:            ^Thread_Data,
+    shader_monitor:         monitor.Monitor,
     thread:                 ^thread.Thread,
 
     cubemap_pipeline:       Cubemap_Pipeline,
@@ -185,66 +180,11 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
 
     app.scene_data.main_light.color = vec4{1, 1, 1, 1}
 
-    when ODIN_OS == .Windows {
-        // Create background threads to monitor shader source changes
-        background_thread :: proc(data: rawptr) {
-            data := cast(^Thread_Data)data
-            log.infof("Data: ", data)
-            handle := data.handle
-            for {
-                log.info("Waiting for signal")
-                wait_status := windows.WaitForSingleObject(handle, windows.INFINITE)
-                switch wait_status {
-                case windows.WAIT_OBJECT_0:
-                    buffer: [1024]byte
-                    bytes_returned: u32
-                    windows.ReadDirectoryChangesW(
-                        handle,
-                        &buffer,
-                        u32(len(buffer)),
-                        false,
-                        windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-                        &bytes_returned,
-                        nil,
-                        nil,
-                    )
-
-                    file_info := cast(^windows.FILE_NOTIFY_INFORMATION)&buffer
-
-                    name, _ := windows.wstring_to_utf8(
-                        &file_info.file_name[0],
-                        cast(int)file_info.file_name_length,
-                    )
-                    log.infof("name: %v\n", name)
-                    for path in data.paths {
-                        if strings.contains(path, name) {
-                            data.should_reload = true
-                        }
-                    }
-
-                    windows.FindNextChangeNotification(handle)
-                case windows.WAIT_TIMEOUT:
-                    // Does this need to be handled?
-                    unreachable()
-                }
-            }
-        }
-
-        handle := windows.FindFirstChangeNotificationW(
-            windows.utf8_to_wstring("bin\\assets\\shaders"),
-            true,
-            windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-        )
-        app.thread_data = new(Thread_Data)
-        app.thread_data.handle = handle
-
-        app.thread_data.paths = make([]string, 2)
-        copy(
-            app.thread_data.paths,
-            []string{app.simple_pipeline.shader.vertex_path, app.simple_pipeline.shader.fragment_path},
-        )
-        thread.run_with_data(app.thread_data, background_thread)
-    }
+    monitor.init(&app.shader_monitor, "bin/assets/shaders", {
+        "Builtin.Object.spv",
+        "Builtin.Cubemap.spv",
+    })
+    thread.run_with_data(&app.shader_monitor, monitor.thread_proc)
 
     return app
 }
@@ -295,17 +235,21 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
-    when ODIN_OS == .Windows {
-        if app.thread_data.should_reload {
-            log.info("Reloading shaders")
+    // Check if the monitor detected any file changes
+    if app.shader_monitor.triggered {
+        log.info("Reloading shaders")
+        app.shader_monitor.triggered = false
+
+        path := app.shader_monitor.paths[app.shader_monitor.path_index]
+        if strings.contains(path, "Object") {
             app.simple_pipeline = create_pipeline(
                 &app.swapchain,
                 &app.device,
                 app.layout,
                 app.descriptor_layout,
             )
+        } else if strings.contains(path, "Cubemap") {
             create_cubemap_pipeline(&app.cubemap_pipeline)
-            app.thread_data.should_reload = false
         }
     }
 
@@ -352,9 +296,7 @@ destroy :: proc(mem: rawptr) {
     app := cast(^Application)mem
     vk.DeviceWaitIdle(app.device.device)
 
-    when ODIN_OS == .Windows {
-        windows.FindCloseChangeNotification(app.thread_data.handle)
-    }
+    monitor.deinit(&app.shader_monitor)
 
     scene_destroy(&app.scene)
 
@@ -460,8 +402,13 @@ save_screenshot :: proc(app: ^Application) {
 
     _screenshot_saver :: proc(data: rawptr) {
         work_data := cast(^Work_Data)data
+        log.info("Saving screenshot")
 
-        stbi.write_png("screenshots/test.png", i32(work_data.width), i32(work_data.height), 4, work_data.data, work_data.stride)
+        now := time.now()
+        year, month, day := time.date(now)
+        hour, min, sec := time.clock(now)
+        path := fmt.ctprintf("screenshots/%v-%v-%v_%v-%v.png", year, month, day, min, sec)
+        stbi.write_png(path, i32(work_data.width), i32(work_data.height), 4, work_data.data, work_data.stride)
 
         log.info("Finished")
 
@@ -505,7 +452,7 @@ update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
     ubo.view_data.proj = linalg.matrix4_perspective(
         linalg.to_radians(f32(app.camera.fov)),
         f32(app.swapchain.extent.width) / f32(app.swapchain.extent.height),
-        0.1,
+        0.01,
         100.0,
     )
     mem.copy(app.uniform_mapped_buffers[current_image], &ubo, size_of(ubo))

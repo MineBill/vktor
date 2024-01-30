@@ -20,6 +20,7 @@ import "core:sys/windows"
 import "core:thread"
 import "vendor:glfw"
 import "core:time"
+import "../monitor"
 // import tracy "packages:odin-tracy"
 
 Symbol_Table :: struct {
@@ -67,8 +68,12 @@ main :: proc() {
     symbols: Symbol_Table
     load_symbols(&symbols)
 
-    data := init_watcher()
-    thread.create_and_start_with_data(&data, watcher_thread)
+    library_monitor: monitor.Monitor
+    monitor.init(&library_monitor, "bin", {
+        "app.dll",
+        "app.so",
+    })
+    thread.create_and_start_with_data(&library_monitor, monitor.thread_proc)
     // } else when ODIN_OS == .Windows {
     //     handle := windows.FindFirstChangeNotificationW(
     //         windows.utf8_to_wstring("bin"),
@@ -91,8 +96,8 @@ main :: proc() {
         // defer tracy.FrameMark()
         win.update(&window)
 
-        if watcher_should_reload(data) {
-            watcher_reset(&data)
+        if library_monitor.triggered {
+            library_monitor.triggered = false
 
             log.info("Game reload requested. Reloading..")
 

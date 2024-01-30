@@ -57,6 +57,7 @@ image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.Ima
         .OPTIMAL,
         {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
         flags)
+    image.layer_count = 1
 
     image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     buffer_copy_to_image(&staging, &image)
@@ -113,7 +114,8 @@ cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) ->
         .R8G8B8A8_SRGB,
         .OPTIMAL,
         {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
-        {.CUBE_COMPATIBLE}, layer_count = 6)
+        {.CUBE_COMPATIBLE}, layer_count = LAYERS)
+    image.layer_count = LAYERS
 
     image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     buffer_copy_to_image(&staging, &image)
@@ -280,6 +282,7 @@ image_generate_mipmaps :: proc(image: ^Image, layer_count: u32 = 1) {
         for i in 1 ..< image.mip_levels {
             log.debugf("Generating mip level %v", i)
             barrier.subresourceRange.baseMipLevel = i - 1
+            // barrier.subresourceRange.baseArrayLayer = i - 1
             barrier.oldLayout = .TRANSFER_DST_OPTIMAL
             barrier.newLayout = .TRANSFER_SRC_OPTIMAL
             barrier.srcAccessMask = {.TRANSFER_WRITE}
