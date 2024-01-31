@@ -1,7 +1,5 @@
 set windows-shell := ["powershell"]
 
-collections := "awd"
-
 tracy := "false"
 
 debug := "-debug"

@@ -16,5 +16,7 @@ struct Scene_Data {
 
 struct Material {
     vec4 albedo_color;
+
+    float metallic;
     float roughness;
 };

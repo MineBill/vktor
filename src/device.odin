@@ -65,12 +65,6 @@ destroy_device :: proc(device: ^Device) {
 }
 
 device_create_descriptor_pool :: proc(device: ^Device, count: u32, sizes: []vk.DescriptorPoolSize) -> (pool: vk.DescriptorPool) {
-    // sizes := []vk.DescriptorPoolSize {
-    //     {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
-    //     {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = count},
-    //     {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = count},
-    // }
-
     pool_info := vk.DescriptorPoolCreateInfo {
         sType         = vk.StructureType.DESCRIPTOR_POOL_CREATE_INFO,
         poolSizeCount = u32(len(sizes)),

@@ -67,28 +67,28 @@ Camera :: struct {
 }
 
 Application :: struct {
-    window:                 glfw.WindowHandle,
-    start_time:             time.Time,
-    device:                 Device,
-    swapchain:              Swapchain,
-    simple_pipeline:        Pipeline,
-    layout:                 vk.PipelineLayout,
-    command_buffers:        []vk.CommandBuffer,
-    descriptor_sets:        []vk.DescriptorSet,
-    descriptor_layout:      vk.DescriptorSetLayout,
-    descriptor_pool:        vk.DescriptorPool,
-    uniform_buffers:        []Buffer,
-    uniform_mapped_buffers: []rawptr,
-    camera:                 Camera,
-    image:                  Image,
-    image_view:             Image_View,
-    minimized:              bool,
-    resized:                bool,
-    scene:                  Scene,
-    odin_context:           runtime.Context,
-    dbg_context:            ^Debug_Context,
-    shader_monitor:         monitor.Monitor,
-    thread:                 ^thread.Thread,
+    window:                     glfw.WindowHandle,
+    start_time:                 time.Time,
+    device:                     Device,
+    swapchain:                  Swapchain,
+    simple_pipeline:            Pipeline,
+    layout:                     vk.PipelineLayout,
+    command_buffers:            []vk.CommandBuffer,
+    descriptor_sets:            []vk.DescriptorSet,
+    global_descriptor_layout:   vk.DescriptorSetLayout,
+    descriptor_pool:            vk.DescriptorPool,
+    uniform_buffers:            []Buffer,
+    uniform_mapped_buffers:     []rawptr,
+    camera:                     Camera,
+    image:                      Image,
+    image_view:                 Image_View,
+    minimized:                  bool,
+    resized:                    bool,
+    scene:                      Scene,
+    odin_context:               runtime.Context,
+    dbg_context:                ^Debug_Context,
+    shader_monitor:             monitor.Monitor,
+    thread:                     ^thread.Thread,
 
     cubemap_pipeline:       Cubemap_Pipeline,
 
@@ -129,9 +129,8 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
     // app.swapchain = create_swapchain(&app.device)
     init_swapchain(&app.device, &app.swapchain)
 
-    app.descriptor_layout = create_descriptor_set_layout(&app.device)
+    app.global_descriptor_layout = create_global_descriptor_set_layout(&app.device)
     app.descriptor_pool = device_create_descriptor_pool(&app.device, MAX_FRAMES_IN_FLIGHT, {
-        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
         {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
         {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
         },
@@ -140,14 +139,14 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
         &app.device,
         app.descriptor_pool,
         MAX_FRAMES_IN_FLIGHT,
-        app.descriptor_layout,
+        app.global_descriptor_layout,
     )
-    app.layout = create_pipeline_layout(&app.device, app.descriptor_layout)
+    app.layout = create_pipeline_layout(app)
     app.simple_pipeline = create_pipeline(
         &app.swapchain,
         &app.device,
         app.layout,
-        app.descriptor_layout,
+        app.global_descriptor_layout,
     )
 
     cubemap_init(&app.cubemap_pipeline, &app.device, &app.swapchain)
@@ -246,7 +245,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
                 &app.swapchain,
                 &app.device,
                 app.layout,
-                app.descriptor_layout,
+                app.global_descriptor_layout,
             )
         } else if strings.contains(path, "Cubemap") {
             create_cubemap_pipeline(&app.cubemap_pipeline)
@@ -315,7 +314,7 @@ destroy :: proc(mem: rawptr) {
     vk.DestroyPipelineLayout(app.device.device, app.layout, nil)
     delete(app.descriptor_sets)
     device_destroy_descriptor_pool(&app.device, app.descriptor_pool)
-    vk.DestroyDescriptorSetLayout(app.device.device, app.descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(app.device.device, app.global_descriptor_layout, nil)
     destroy_swapchain(&app.swapchain)
     destroy_device(&app.device)
 
@@ -466,7 +465,7 @@ create_uniform_buffers :: proc(app: ^Application) {
     app.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
 
     for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-        size := u32(size_of(Uniform_Buffer_Object) + size_of(Material))
+        size := u32(size_of(Uniform_Buffer_Object))
         app.uniform_buffers[i] = buffer_create(
             &app.device,
             size,
@@ -487,12 +486,6 @@ create_uniform_buffers :: proc(app: ^Application) {
             buffer = app.uniform_buffers[i].handle,
             offset = 0,
             range  = size_of(Uniform_Buffer_Object),
-        }
-
-        material_info := vk.DescriptorBufferInfo {
-            buffer = app.uniform_buffers[i].handle,
-            offset = buffer_info.range,
-            range  = size_of(Material),
         }
 
         image_info := vk.DescriptorImageInfo {
@@ -520,15 +513,6 @@ create_uniform_buffers :: proc(app: ^Application) {
                 descriptorCount = 1,
                 pImageInfo = &image_info,
             },
-             {
-                sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
-                dstSet = app.descriptor_sets[i],
-                dstBinding = 2,
-                dstArrayElement = 0,
-                descriptorType = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo = &material_info,
-            },
         }
 
         vk.UpdateDescriptorSets(
@@ -545,21 +529,20 @@ update_descriptor_sets :: proc() {
 
 }
 
-create_pipeline_layout :: proc(
-    device: ^Device,
-    descriptor_set_layout: vk.DescriptorSetLayout,
-) -> (
-    layout: vk.PipelineLayout,
-) {
-    descriptor_set_layout := descriptor_set_layout
+create_pipeline_layout :: proc(app: ^Application) -> (layout: vk.PipelineLayout) {
+    set_layouts := []vk.DescriptorSetLayout{
+        app.global_descriptor_layout,
+        create_material_set_layout(&app.device),
+    }
+
     pipeline_layout_create_info := vk.PipelineLayoutCreateInfo {
         sType                  = vk.StructureType.PIPELINE_LAYOUT_CREATE_INFO,
         pushConstantRangeCount = 0,
-        setLayoutCount         = 1,
-        pSetLayouts            = &descriptor_set_layout,
+        setLayoutCount         = u32(len(set_layouts)),
+        pSetLayouts            = raw_data(set_layouts),
     }
 
-    result := vk.CreatePipelineLayout(device.device, &pipeline_layout_create_info, nil, &layout)
+    result := vk.CreatePipelineLayout(app.device.device, &pipeline_layout_create_info, nil, &layout)
 
     if result != vk.Result.SUCCESS {
         log.error("Failed to create pipeline layout")
@@ -567,19 +550,12 @@ create_pipeline_layout :: proc(
     return
 }
 
-create_descriptor_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSetLayout) {
+create_global_descriptor_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSetLayout) {
     ubo_layout_binding := vk.DescriptorSetLayoutBinding {
         binding = 0,
         descriptorCount = 1,
         descriptorType = vk.DescriptorType.UNIFORM_BUFFER,
         stageFlags = {.VERTEX, .FRAGMENT},
-    }
-
-    material_layout_binding := vk.DescriptorSetLayoutBinding {
-        binding = 2,
-        descriptorCount = 1,
-        descriptorType = vk.DescriptorType.UNIFORM_BUFFER,
-        stageFlags = {.FRAGMENT},
     }
 
     sampler_layout_binding := vk.DescriptorSetLayoutBinding {
@@ -593,7 +569,6 @@ create_descriptor_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorS
     bindings := []vk.DescriptorSetLayoutBinding {
         ubo_layout_binding,
         sampler_layout_binding,
-        material_layout_binding,
     }
 
     layout_info := vk.DescriptorSetLayoutCreateInfo {
@@ -610,14 +585,14 @@ create_pipeline :: proc(
     swapchain: ^Swapchain,
     device: ^Device,
     layout: vk.PipelineLayout,
-    descriptor_layout: vk.DescriptorSetLayout,
+    global_descriptor_layout: vk.DescriptorSetLayout,
 ) -> (
     pipeline: Pipeline,
 ) {
     config := default_pipeline_config()
     config.renderpass = swapchain.renderpass
     config.layout = layout
-    config.descriptor_set_layout = descriptor_layout
+    config.descriptor_set_layout = global_descriptor_layout
     pipeline = create_graphics_pipeline(device, config)
     return
 }
@@ -736,21 +711,23 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 
             vk.CmdBindIndexBuffer(command_buffer, model.index_buffer.handle, 0, .UINT16)
 
+            // NOTE(minebill): This probably shouldn't happen every frame, right here
             mem.copy(
-                rawptr(
-                    uintptr(a.uniform_mapped_buffers[a.swapchain.current_frame]) +
-                    uintptr(size_of(Uniform_Buffer_Object)),
-                ),
-                &model.material,
-                size_of(Material),
+                model.material.buffer,
+                &model.material.block,
+                size_of(Material_Block),
             )
+            descriptor_sets := []vk.DescriptorSet {
+                a.descriptor_sets[a.swapchain.current_frame],
+                model.material.descriptor_set,
+            }
             vk.CmdBindDescriptorSets(
                 command_buffer,
                 .GRAPHICS,
                 a.layout,
                 0,
-                1,
-                &a.descriptor_sets[a.swapchain.current_frame],
+                u32(len(descriptor_sets)),
+                raw_data(descriptor_sets),
                 0,
                 nil,
             )
@@ -791,9 +768,9 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
         log.debugf("Processing node %v", node.name)
         // if node.name != "Cube.002" do continue
         mesh := node.mesh
-        model := Model {
-            material = default_material(),
-        }
+        model := Model {}
+
+        init_material(&app.device, &model.material)
 
         for primitive in mesh.primitives {
 
@@ -850,10 +827,42 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
             model.index_buffer = create_index_buffer(&app.device, indices)
             model.num_indices = u32(len(indices))
 
+            albedo_data: []byte
+            normal_map_data: []byte
+
             material:^gltf.material = primitive.material
             if material != nil {
                 log.debugf("Processing material %v", material.name)
+                if material.has_pbr_metallic_roughness {
+                    aa: if material.pbr_metallic_roughness.base_color_texture.texture != nil {
+                        texture := material.pbr_metallic_roughness.base_color_texture.texture
+                        buffer := texture.image_.buffer_view
+                        color_base_data := buffer.buffer.data
+                        color_offset := buffer.offset
+
+                        size := texture.image_.buffer_view.size
+
+                        albedo_data = (cast([^]byte)(uintptr(color_base_data) + uintptr(color_offset)))[:size]
+
+                        texture = material.normal_texture.texture
+
+                        // NOTE(minebill): Do proper checking here
+                        if texture == nil do break aa
+                        buffer = texture.image_.buffer_view
+                        color_base_data = buffer.buffer.data
+                        color_offset = buffer.offset
+
+                        size = texture.image_.buffer_view.size
+
+                        normal_map_data = (cast([^]byte)(uintptr(color_base_data) + uintptr(color_offset)))[:size]
+                    }
+
+                    model.material.albedo_color = material.pbr_metallic_roughness.base_color_factor
+                    model.material.metallic_factor = material.pbr_metallic_roughness.metallic_factor
+                    model.material.roughness_factor = material.pbr_metallic_roughness.roughness_factor
+                }
             }
+            update_material(&app.device, &model.material, albedo_data, {})
         }
 
         append(&scene.models, model)
@@ -868,21 +877,166 @@ scene_destroy :: proc(scene: ^Scene) {
     }
 }
 
-Material :: struct {
-    albedo_color:   vec4,
-    roughness:      f32,
+Material_Block :: struct {
+    albedo_color:       vec4,
+    metallic_factor:    f32,
+    roughness_factor:   f32,
 }
 
-default_material :: proc() -> Material {
-    return {albedo_color = vec4{1, 1, 1, 1}, roughness = 1}
+Material :: struct {
+    descriptor_set:     vk.DescriptorSet,
+    descriptor_pool:    vk.DescriptorPool,
+    vk_buffer:          Buffer,
+    buffer:             rawptr,
+
+    albedo_image:       Image,
+    albedo_image_view:  Image_View,
+
+    normal_map_image:   Image,
+    normal_map_view:    Image_View,
+
+    using block:        Material_Block,
+}
+
+WHITE_TEXTURE :: #load("../assets/textures/white_texture.png")
+DEFAULT_NORMAL_MAP :: #load("../assets/textures/default_normal_map.png")
+
+init_material :: proc(device: ^Device, material: ^Material) {
+    size := u32(size_of(Material_Block))
+    log.debugf("Size of Material: %v", size_of(Material))
+    material.vk_buffer = buffer_create(
+        device,
+        size,
+        {.UNIFORM_BUFFER},
+        {.HOST_VISIBLE, .HOST_COHERENT})
+
+    vk.MapMemory(device.device, material.vk_buffer.memory, 0, vk.DeviceSize(size), {}, &material.buffer)
+
+    material.descriptor_pool = device_create_descriptor_pool(device, 1, {
+        {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = 1},
+        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
+        {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
+    })
+
+    material.descriptor_set = device_allocate_descriptor_sets(device, material.descriptor_pool, 1, create_material_set_layout(device))[0]
+    material.albedo_color = vec4{1, 1, 1, 1}
+    material.metallic_factor = 0.5
+    material.roughness_factor = 0.5
+}
+
+update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map: []byte) {
+
+    material.albedo_image = image_load_from_memory(device, albedo if len(albedo) != 0 else WHITE_TEXTURE)
+    material.albedo_image_view = image_view_create(&material.albedo_image, material.albedo_image.format, {.COLOR})
+
+    material.normal_map_image = image_load_from_memory(device, normal_map if len(normal_map) != 0 else WHITE_TEXTURE)
+    material.normal_map_view = image_view_create(&material.normal_map_image, material.albedo_image.format, {.COLOR})
+
+    buffer_info := vk.DescriptorBufferInfo {
+        buffer = material.vk_buffer.handle,
+        offset = 0,
+        range  = size_of(Material_Block),
+    }
+
+    image_info := vk.DescriptorImageInfo {
+        imageLayout = .READ_ONLY_OPTIMAL,
+        imageView   = material.albedo_image_view.handle,
+        sampler     = material.albedo_image_view.image.sampler,
+    }
+
+    normal_map_info := vk.DescriptorImageInfo {
+        imageLayout = .READ_ONLY_OPTIMAL,
+        imageView   = material.normal_map_view.handle,
+        sampler     = material.normal_map_image.sampler,
+    }
+
+    descriptor_writes := []vk.WriteDescriptorSet {
+         {
+            sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+            dstSet = material.descriptor_set,
+            dstBinding = 0,
+            dstArrayElement = 0,
+            descriptorType = .UNIFORM_BUFFER,
+            descriptorCount = 1,
+            pBufferInfo = &buffer_info,
+        },
+         {
+            sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+            dstSet = material.descriptor_set,
+            dstBinding = 1,
+            dstArrayElement = 0,
+            descriptorType = .COMBINED_IMAGE_SAMPLER,
+            descriptorCount = 1,
+            pImageInfo = &image_info,
+        },
+    }
+
+    vk.UpdateDescriptorSets(
+        device.device,
+        u32(len(descriptor_writes)),
+        raw_data(descriptor_writes),
+        0,
+        nil,
+    )
+
+    return
+}
+
+create_material_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSetLayout) {
+    material_layout_binding := vk.DescriptorSetLayoutBinding {
+        binding = 0,
+        descriptorCount = 1,
+        descriptorType = vk.DescriptorType.UNIFORM_BUFFER,
+        stageFlags = {.FRAGMENT},
+    }
+
+    albedo_texture_binding := vk.DescriptorSetLayoutBinding {
+        binding = 1,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        stageFlags = {.FRAGMENT},
+        pImmutableSamplers = nil,
+    }
+
+    normal_map_binding := vk.DescriptorSetLayoutBinding {
+        binding = 2,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        stageFlags = {.FRAGMENT},
+        pImmutableSamplers = nil,
+    }
+
+    // environment_texture_binding := vk.DescriptorSetLayoutBinding {
+    //     binding = 2,
+    //     descriptorCount = 1,
+    //     descriptorType = .COMBINED_IMAGE_SAMPLER,
+    //     stageFlags = {.FRAGMENT},
+    //     pImmutableSamplers = nil,
+    // }
+
+    bindings := []vk.DescriptorSetLayoutBinding {
+        material_layout_binding,
+        albedo_texture_binding,
+        normal_map_binding,
+        // environment_texture_binding,
+    }
+
+    layout_info := vk.DescriptorSetLayoutCreateInfo {
+        sType        = vk.StructureType.DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        bindingCount = u32(len(bindings)),
+        pBindings    = raw_data(bindings),
+    }
+
+    vk_check(vk.CreateDescriptorSetLayout(device.device, &layout_info, nil, &layout))
+    return
 }
 
 Model :: struct {
     vertex_buffer:  Buffer,
     index_buffer:   Buffer,
 
-    image:          Image,
-    image_view:     Image_View,
+    // image:          Image,
+    // image_view:     Image_View,
 
     num_indices:    u32,
     material:       Material,

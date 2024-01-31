@@ -67,6 +67,43 @@ image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.Ima
     return
 }
 
+image_load_from_memory :: proc(device: ^Device, data: []byte, flags := vk.ImageCreateFlags{}) -> (image: Image) {
+    x, y, channels: i32
+    image_data := stb.load_from_memory(raw_data(data), i32(len(data)), &x, &y, &channels, 4)
+    // assert(channels == 4, "Alpha channels MUST be included")
+    
+    size := x * y * 4
+
+    mip_levels := cast(u32)math.floor(math.log2(cast(f32)max(x, y))) + 1
+    // log.debugf("Will generated %v mip levels for '%v'", mip_levels, file_name)
+
+    staging := buffer_create(
+        device,
+        u32(size),
+        {.TRANSFER_SRC},
+        {.HOST_VISIBLE, .HOST_COHERENT})
+    defer buffer_destroy(&staging)
+
+    buffer_copy_data(&staging, image_data[:size])
+
+    image = image_create(
+        device, 
+        u32(x), u32(y),
+        mip_levels,
+        .R8G8B8A8_SRGB,
+        .OPTIMAL,
+        {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
+        flags)
+    image.layer_count = 1
+
+    image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    buffer_copy_to_image(&staging, &image)
+    // transition_image_layout(&image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+
+    image_generate_mipmaps(&image)
+    return
+}
+
 cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) -> (image: Image) {
     texture_data: [6][^]byte
 
