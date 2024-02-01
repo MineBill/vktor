@@ -9,7 +9,6 @@ Swapchain :: struct {
     framebuffers:               [dynamic]vk.Framebuffer,
     renderpass:                 vk.RenderPass,
     depth_image:                Image,
-    depth_image_view:           Image_View,
     swapchain_images:           [dynamic]vk.Image,
     swapchain_image_views:      [dynamic]vk.ImageView,
     device:                     ^Device,
@@ -103,7 +102,6 @@ destroy_swapchain :: proc(using swapchain: ^Swapchain) {
     }
     delete(swapchain_image_views)
 
-    image_view_destroy(&swapchain.depth_image_view)
     image_destroy(&swapchain.depth_image)
 
     vk.DestroySwapchainKHR(device.device, swapchain_handle, nil)
@@ -349,7 +347,7 @@ create_depth_resources :: proc(swapchain: ^Swapchain) {
         .OPTIMAL,
         {.DEPTH_STENCIL_ATTACHMENT},
     )
-    swapchain.depth_image_view = image_view_create(&swapchain.depth_image, format, {.DEPTH})
+    image_view_create(&swapchain.depth_image, format, {.DEPTH})
 }
 
 find_supported_format :: proc(
@@ -378,7 +376,7 @@ create_framebuffers :: proc(using swapchain: ^Swapchain) {
     )
 
     for view, i in swapchain_image_views {
-        attachments := []vk.ImageView{view, swapchain.depth_image_view.handle}
+        attachments := []vk.ImageView{view, swapchain.depth_image.view}
 
         framebuffer_create_info := vk.FramebufferCreateInfo {
             sType           = vk.StructureType.FRAMEBUFFER_CREATE_INFO,

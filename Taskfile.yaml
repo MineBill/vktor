@@ -41,7 +41,7 @@ tasks:
     cmds:
       - |
         odin build loader -use-separate-modules -collection:packages=packages \
-        -o:none -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
+        -o:none -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
     sources:
       - loader/**/*.odin
       - window/**/*.odin

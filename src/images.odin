@@ -16,11 +16,8 @@ Image :: struct {
     mip_levels:     u32,
     sampler:        vk.Sampler,
     layer_count:    u32,
-}
 
-Image_View :: struct {
-    image:  ^Image,
-    handle: vk.ImageView,
+    view:           vk.ImageView,
 }
 
 image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.ImageCreateFlags{}) -> (image: Image) {
@@ -218,6 +215,7 @@ image_create :: proc(
 }
 
 image_destroy :: proc(image: ^Image) {
+    vk.DestroyImageView(image.device.device, image.view, nil)
     vk.DestroySampler(image.device.device, image.sampler, nil)
     vk.FreeMemory(image.device.device, image.memory, nil)
     vk.DestroyImage(image.device.device, image.handle, nil)
@@ -306,20 +304,17 @@ image_generate_mipmaps :: proc(image: ^Image, layer_count: u32 = 1) {
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         subresourceRange = vk.ImageSubresourceRange {
             aspectMask = {.COLOR},
-            baseArrayLayer = 0,
-            layerCount = layer_count,
+            layerCount = 1,
             levelCount  = 1,
         },
     }
 
-
     for j in 0 ..< image.layer_count {
+        barrier.subresourceRange.baseArrayLayer = j
         width  := i32(image.width)
         height := i32(image.height)
         for i in 1 ..< image.mip_levels {
-            log.debugf("Generating mip level %v", i)
             barrier.subresourceRange.baseMipLevel = i - 1
-            // barrier.subresourceRange.baseArrayLayer = i - 1
             barrier.oldLayout = .TRANSFER_DST_OPTIMAL
             barrier.newLayout = .TRANSFER_SRC_OPTIMAL
             barrier.srcAccessMask = {.TRANSFER_WRITE}
@@ -365,23 +360,22 @@ image_generate_mipmaps :: proc(image: ^Image, layer_count: u32 = 1) {
             if width > 1 do width /= 2
             if height > 1 do height /= 2
         }
+
+        barrier.subresourceRange.baseMipLevel = image.mip_levels - 1
+        barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+        barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+        barrier.srcAccessMask = {.TRANSFER_WRITE}
+        barrier.dstAccessMask = {.SHADER_READ}
+
+        vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
     }
-
-    barrier.subresourceRange.baseMipLevel = image.mip_levels - 1
-    barrier.oldLayout = .TRANSFER_DST_OPTIMAL
-    barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
-    barrier.srcAccessMask = {.TRANSFER_WRITE}
-    barrier.dstAccessMask = {.SHADER_READ}
-
-    vk.CmdPipelineBarrier(cmd, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
 
     image.sampler = image_sampler_create(image.device, image.mip_levels)
 }
 
 // Takes and returns custom wrappers over the vk objects.
-image_view_create :: proc(image: ^Image, format: vk.Format, aspect: vk.ImageAspectFlags) -> (view: Image_View) {
-    view.image = image
-    view.handle = image_view_create_raw(
+image_view_create :: proc(image: ^Image, format: vk.Format, aspect: vk.ImageAspectFlags) {
+    image.view = image_view_create_raw(
         image.device,
         image.handle,
         image.mip_levels,
@@ -390,9 +384,8 @@ image_view_create :: proc(image: ^Image, format: vk.Format, aspect: vk.ImageAspe
     return
 }
 
-cubemap_image_view_create :: proc(image: ^Image, aspect: vk.ImageAspectFlags) -> (view: Image_View) {
-    view.image = image
-    view.handle = image_view_create_raw(
+cubemap_image_view_create :: proc(image: ^Image, aspect: vk.ImageAspectFlags) {
+    image.view = image_view_create_raw(
         image.device,
         image.handle,
         image.mip_levels,
@@ -428,10 +421,6 @@ image_view_create_raw :: proc(
 
     vk_check(vk.CreateImageView(device.device, &view_info, nil, &view))
     return
-}
-
-image_view_destroy :: proc(view: ^Image_View) {
-    vk.DestroyImageView(view.image.device.device, view.handle, nil)
 }
 
 image_sampler_create :: proc(device: ^Device, mip_levels: u32 = 0, bias: f32 = 0) -> (sampler: vk.Sampler) {

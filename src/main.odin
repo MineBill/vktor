@@ -75,12 +75,12 @@ Application :: struct {
     command_buffers:            []vk.CommandBuffer,
     descriptor_sets:            []vk.DescriptorSet,
     global_descriptor_layout:   vk.DescriptorSetLayout,
+    material_layout:            vk.DescriptorSetLayout,
     descriptor_pool:            vk.DescriptorPool,
     uniform_buffers:            []Buffer,
     uniform_mapped_buffers:     []rawptr,
     camera:                     Camera,
     image:                      Image,
-    image_view:                 Image_View,
     minimized:                  bool,
     resized:                    bool,
     scene:                      Scene,
@@ -128,6 +128,7 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
     // app.swapchain = create_swapchain(&app.device)
     init_swapchain(&app.device, &app.swapchain)
 
+    app.material_layout = create_material_set_layout(&app.device)
     app.global_descriptor_layout = create_global_descriptor_set_layout(&app.device)
     app.descriptor_pool = device_create_descriptor_pool(&app.device, MAX_FRAMES_IN_FLIGHT, {
         {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
@@ -172,7 +173,7 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
     app.scene = scene_load_from_file(app, "assets/models/scene.glb")
 
     app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
-    app.image_view = image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
+    image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
 
     create_uniform_buffers(app)
 
@@ -307,8 +308,9 @@ destroy :: proc(mem: rawptr) {
     delete(app.uniform_buffers)
     delete(app.uniform_mapped_buffers)
 
-    image_view_destroy(&app.image_view)
     image_destroy(&app.image)
+
+    cubemap_deinit(&app.cubemap_pipeline)
 
     vk.DeviceWaitIdle(app.device.device)
     free_command_buffers(&app.device, app.command_buffers)
@@ -317,6 +319,7 @@ destroy :: proc(mem: rawptr) {
     delete(app.descriptor_sets)
     device_destroy_descriptor_pool(&app.device, app.descriptor_pool)
     vk.DestroyDescriptorSetLayout(app.device.device, app.global_descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(app.device.device, app.material_layout, nil)
     destroy_swapchain(&app.swapchain)
     destroy_device(&app.device)
 
@@ -491,8 +494,8 @@ create_uniform_buffers :: proc(app: ^Application) {
 
         image_info := vk.DescriptorImageInfo {
             imageLayout = .READ_ONLY_OPTIMAL,
-            imageView   = app.image_view.handle,
-            sampler     = app.image_view.image.sampler,
+            imageView   = app.image.view,
+            sampler     = app.image.sampler,
         }
 
         descriptor_writes := []vk.WriteDescriptorSet {
@@ -533,7 +536,7 @@ update_descriptor_sets :: proc() {
 create_pipeline_layout :: proc(app: ^Application) -> (layout: vk.PipelineLayout) {
     set_layouts := []vk.DescriptorSetLayout{
         app.global_descriptor_layout,
-        create_material_set_layout(&app.device),
+        app.material_layout,
     }
 
     model_constant := vk.PushConstantRange {
@@ -789,7 +792,7 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
         mesh := node.mesh
         model := Model {}
 
-        init_material(&app.device, &model.material)
+        init_material(&app.device, &model.material, app.material_layout)
 
         for primitive in mesh.primitives {
 
@@ -855,7 +858,7 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
 
             material:^gltf.material = primitive.material
             if material != nil {
-                log.debugf("Processing material %v", material.name)
+                log.debugf("\tProcessing material %v", material.name)
                 if material.has_pbr_metallic_roughness {
                     aa: if material.pbr_metallic_roughness.base_color_texture.texture != nil {
                         texture := material.pbr_metallic_roughness.base_color_texture.texture
@@ -913,10 +916,8 @@ Material :: struct {
     buffer:             rawptr,
 
     albedo_image:       Image,
-    albedo_image_view:  Image_View,
 
     normal_map_image:   Image,
-    normal_map_view:    Image_View,
 
     using block:        Material_Block,
 }
@@ -924,9 +925,8 @@ Material :: struct {
 WHITE_TEXTURE :: #load("../assets/textures/white_texture.png")
 DEFAULT_NORMAL_MAP :: #load("../assets/textures/default_normal_map.png")
 
-init_material :: proc(device: ^Device, material: ^Material) {
+init_material :: proc(device: ^Device, material: ^Material, layout: vk.DescriptorSetLayout) {
     size := u32(size_of(Material_Block))
-    log.debugf("Size of Material: %v", size_of(Material))
     material.vk_buffer = buffer_create(
         device,
         size,
@@ -941,19 +941,34 @@ init_material :: proc(device: ^Device, material: ^Material) {
         {type = vk.DescriptorType.COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
     })
 
-    material.descriptor_set = device_allocate_descriptor_sets(device, material.descriptor_pool, 1, create_material_set_layout(device))[0]
+    material.descriptor_set = device_allocate_descriptor_sets(
+        device, 
+        material.descriptor_pool, 
+        1, 
+        layout)[0]
+
     material.albedo_color = vec4{1, 1, 1, 1}
     material.metallic_factor = 0.5
     material.roughness_factor = 0.5
 }
 
+material_destroy :: proc(m: ^Material) {
+    vk.UnmapMemory(m.vk_buffer.device.device, m.vk_buffer.memory)
+    buffer_destroy(&m.vk_buffer)
+
+    image_destroy(&m.albedo_image)
+    image_destroy(&m.normal_map_image)
+
+    device_destroy_descriptor_pool(m.vk_buffer.device, m.descriptor_pool)
+}
+
 update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map: []byte) {
 
     material.albedo_image = image_load_from_memory(device, albedo if len(albedo) != 0 else WHITE_TEXTURE)
-    material.albedo_image_view = image_view_create(&material.albedo_image, material.albedo_image.format, {.COLOR})
+    image_view_create(&material.albedo_image, material.albedo_image.format, {.COLOR})
 
     material.normal_map_image = image_load_from_memory(device, normal_map if len(normal_map) != 0 else WHITE_TEXTURE)
-    material.normal_map_view = image_view_create(&material.normal_map_image, material.albedo_image.format, {.COLOR})
+    image_view_create(&material.normal_map_image, material.albedo_image.format, {.COLOR})
 
     buffer_info := vk.DescriptorBufferInfo {
         buffer = material.vk_buffer.handle,
@@ -963,13 +978,13 @@ update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map
 
     image_info := vk.DescriptorImageInfo {
         imageLayout = .READ_ONLY_OPTIMAL,
-        imageView   = material.albedo_image_view.handle,
-        sampler     = material.albedo_image_view.image.sampler,
+        imageView   = material.albedo_image.view,
+        sampler     = material.albedo_image.sampler,
     }
 
     normal_map_info := vk.DescriptorImageInfo {
         imageLayout = .READ_ONLY_OPTIMAL,
-        imageView   = material.normal_map_view.handle,
+        imageView   = material.normal_map_image.view,
         sampler     = material.normal_map_image.sampler,
     }
 
@@ -1054,6 +1069,7 @@ create_material_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSet
     return
 }
 
+
 Model :: struct {
     vertex_buffer:  Buffer,
     index_buffer:   Buffer,
@@ -1070,6 +1086,7 @@ Model :: struct {
 }
 
 destroy_model :: proc(model: ^Model) {
+    material_destroy(&model.material)
     buffer_destroy(&model.vertex_buffer)
     buffer_destroy(&model.index_buffer)
 }

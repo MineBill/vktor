@@ -28,7 +28,6 @@ Cubemap_Pipeline :: struct {
     // images:             [Cubemap_Side]Image,
     // image_views:        [Cubemap_Side]Image_View,
     image:              Image,
-    image_view:         Image_View,
 }
 
 cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^Swapchain) {
@@ -61,7 +60,7 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
     }
 
     pipeline.image = cubemap_image_load_from_files(device, file_names)
-    pipeline.image_view = cubemap_image_view_create(&pipeline.image, {.COLOR})
+    cubemap_image_view_create(&pipeline.image, {.COLOR})
 
     log.debugf("%v", pipeline.image.sampler)
 
@@ -128,6 +127,23 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
     create_cubemap_uniform_buffers(pipeline)
 }
 
+cubemap_deinit :: proc(c: ^Cubemap_Pipeline) {
+    buffer_destroy(&c.buffer)
+
+    for &ub in c.uniform_buffers {
+        buffer_destroy(&ub)
+    }
+
+    image_destroy(&c.image)
+
+    device_destroy_descriptor_pool(c.device, c.descriptor_pool)
+
+    vk.DestroyDescriptorSetLayout(c.device.device, c.descriptor_layout, nil)
+
+    vk.DestroyPipelineLayout(c.device.device, c.pipeline_layout, nil)
+    destroy_grphics_pipeline(c)
+}
+
 create_cubemap_uniform_buffers :: proc(pipeline: ^Cubemap_Pipeline) {
     pipeline.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
     pipeline.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
@@ -158,7 +174,7 @@ create_cubemap_uniform_buffers :: proc(pipeline: ^Cubemap_Pipeline) {
 
         image_info := vk.DescriptorImageInfo {
             imageLayout = .READ_ONLY_OPTIMAL,
-            imageView   = pipeline.image_view.handle,
+            imageView   = pipeline.image.view,
             sampler     = pipeline.image.sampler,
         }
 
