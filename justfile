@@ -15,7 +15,6 @@ build:
     -define:TRACY_ENABLE={{tracy}}
 
 build-assets:
-    # mkdir -p bin/assets/shaders
     glslc -fshader-stage=frag assets/shaders/Builtin.Object.frag.glsl -o bin/assets/shaders/Builtin.Object.frag.spv --target-env=vulkan
     glslc -fshader-stage=vert assets/shaders/Builtin.Object.vert.glsl -o bin/assets/shaders/Builtin.Object.vert.spv --target-env=vulkan
     spirv-link bin/assets/shaders/Builtin.Object.frag.spv bin/assets/shaders/Builtin.Object.vert.spv -o bin/assets/shaders/Builtin.Object.spv

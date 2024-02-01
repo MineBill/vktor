@@ -10,6 +10,7 @@ Event :: union {
 	MouseButtonEvent,
 	MousePositionEvent,
 	WindowResizedEvent,
+    Mouse_Scroll_Event,
 }
 
 KeyEvent :: struct {
@@ -28,6 +29,10 @@ MouseButtonEvent :: struct {
 
 MousePositionEvent :: struct {
     pos: [2]f32,
+}
+
+Mouse_Scroll_Event :: struct {
+    delta: [2]f32,
 }
 
 WindowResizedEvent :: struct {
@@ -66,6 +71,7 @@ setup_events :: proc(window: glfw.WindowHandle, event_context: ^Event_Context) {
     glfw.SetKeyCallback(window, glfw_key_callback)
     glfw.SetMouseButtonCallback(window, glfw_mouse_button_callback)
     glfw.SetCursorPosCallback(window, glfw_cursor_pos_callback)
+    glfw.SetScrollCallback(window, glfw_scroll_callback)
 }
 
 glfw_window_size_callback :: proc "c" (win: glfw.WindowHandle, width, height: i32) {
@@ -121,6 +127,13 @@ glfw_cursor_pos_callback :: proc "c" (win: glfw.WindowHandle, x, y: f64) {
 	context = state.odin_context
 
 	append(&state.events, MousePositionEvent{[2]f32{f32(x), f32(y)}})
+}
+
+glfw_scroll_callback :: proc "c" (win: glfw.WindowHandle, x, y: f64) {
+	state := (cast(^Event_Context)(glfw.GetWindowUserPointer(win)))
+	context = state.odin_context
+
+	append(&state.events, Mouse_Scroll_Event{[2]f32{f32(x), f32(y)}})
 }
 
 flush_input :: proc() {

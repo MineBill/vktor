@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+vars:
+  DEBUG: -debug
+  USE_TRACY: false
+
+tasks:
+
+  build-shaders:
+    aliases: [a2]
+    cmds:
+      - glslc -fshader-stage=frag assets/shaders/Builtin.Object.frag.glsl -o bin/assets/shaders/Builtin.Object.frag.spv --target-env=vulkan
+      - glslc -fshader-stage=vert assets/shaders/Builtin.Object.vert.glsl -o bin/assets/shaders/Builtin.Object.vert.spv --target-env=vulkan
+      - spirv-link bin/assets/shaders/Builtin.Object.frag.spv bin/assets/shaders/Builtin.Object.vert.spv -o bin/assets/shaders/Builtin.Object.spv
+
+      - glslc -fshader-stage=frag assets/shaders/Builtin.Cubemap.frag.glsl -o bin/assets/shaders/Builtin.Cubemap.frag.spv
+      - glslc -fshader-stage=vert assets/shaders/Builtin.Cubemap.vert.glsl -o bin/assets/shaders/Builtin.Cubemap.vert.spv 
+      - spirv-link bin/assets/shaders/Builtin.Cubemap.frag.spv bin/assets/shaders/Builtin.Cubemap.vert.spv -o bin/assets/shaders/Builtin.Cubemap.spv
+    sources:
+      - assets/shaders/**/*.glsl
+    generates:
+      - bin/assets/shaders/Builtin.Object.spv
+      - bin/assets/shaders/Builtin.Cubemap.spv
+
+  build:
+    cmds:
+      - |
+        odin build src -build-mode:shared -define:VALIDATION=true \
+        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:none -use-separate-modules \
+        -collection:packages=packages -define:GLFW_SHARED=true \
+        -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
+    sources:
+      - src/**/*.odin
+    generates:
+      - bin/app.dll
+
+
+  build-loader:
+    cmds:
+      - |
+        odin build loader -use-separate-modules -collection:packages=packages \
+        -o:none -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
+    sources:
+      - loader/**/*.odin
+    generates:
+      - loader{{exeExt}}
+
+  run:
+    deps: [build-loader, build, build-shaders]
+    cmds:
+      - ./loader{{exeExt}}

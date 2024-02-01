@@ -25,7 +25,7 @@ WINDOW_WIDTH :: 600
 WINDOW_HEIGHT :: 400
 WINDOW_TITLE :: "Vulkan"
 
-MAX_FRAMES_IN_FLIGHT :: 2
+MAX_FRAMES_IN_FLIGHT :: 1
 
 vec2 :: [2]f32
 vec3 :: [3]f32
@@ -39,7 +39,6 @@ mat3 :: matrix[3, 3]f32
 mat4 :: matrix[4, 4]f32
 
 View_Data :: struct {
-    model: mat4,
     view:  mat4,
     proj:  mat4,
 }
@@ -231,6 +230,9 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
             }
 
             mouse = a.pos
+        case Mouse_Scroll_Event:
+            log.debugf("Scroll delta: %v", a.delta)
+            app.camera.fov += a.delta.y
         }
     }
 
@@ -434,7 +436,6 @@ update_uniform_buffer :: proc(app: ^Application, current_image: u32) {
     ubo := Uniform_Buffer_Object{}
 
     ubo.scene_data = app.scene_data
-    ubo.view_data.model = linalg.MATRIX4F32_IDENTITY
 
     euler := app.camera.euler_angles
     app.camera.rotation = linalg.quaternion_from_euler_angles(
@@ -535,9 +536,16 @@ create_pipeline_layout :: proc(app: ^Application) -> (layout: vk.PipelineLayout)
         create_material_set_layout(&app.device),
     }
 
+    model_constant := vk.PushConstantRange {
+        offset = 0,
+        size = size_of(mat4),
+        stageFlags = {.VERTEX},
+    }
+
     pipeline_layout_create_info := vk.PipelineLayoutCreateInfo {
         sType                  = vk.StructureType.PIPELINE_LAYOUT_CREATE_INFO,
-        pushConstantRangeCount = 0,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges    = &model_constant,
         setLayoutCount         = u32(len(set_layouts)),
         pSetLayouts            = raw_data(set_layouts),
     }
@@ -717,6 +725,17 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
                 &model.material.block,
                 size_of(Material_Block),
             )
+
+            trans := linalg.matrix4_translate(model.translation)
+            rot := linalg.matrix4_from_quaternion(model.rotation)
+            model_matrix := trans * rot
+            vk.CmdPushConstants(
+                command_buffer,
+                a.layout,
+                {.VERTEX},
+                0, size_of(mat4), &model_matrix,
+            )
+
             descriptor_sets := []vk.DescriptorSet {
                 a.descriptor_sets[a.swapchain.current_frame],
                 model.material.descriptor_set,
@@ -810,10 +829,14 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
                     color = {1, 1, 1},
                     texCoord = {tex_data[ti], tex_data[ti + 1]},
                 }
-                vertices[i].pos += node.translation
+                // vertices[i].pos += node.translation
                 vi += 3
                 ti += 2
             }
+            model.translation = node.translation
+
+            r := node.rotation
+            model.rotation = quaternion(w = r.w, x = r.x, y = r.y, z = r.z)
 
             accessor := primitive.indices
             data := accessor.buffer_view.buffer.data
@@ -1035,6 +1058,8 @@ Model :: struct {
     vertex_buffer:  Buffer,
     index_buffer:   Buffer,
 
+    translation: vec3,
+    rotation: quaternion128,
     // image:          Image,
     // image_view:     Image_View,
 

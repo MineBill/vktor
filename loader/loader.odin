@@ -21,7 +21,6 @@ import "core:thread"
 import "vendor:glfw"
 import "core:time"
 import "../monitor"
-// import tracy "packages:odin-tracy"
 
 Symbol_Table :: struct {
     init:     #type proc(win: glfw.WindowHandle) -> rawptr,
@@ -74,17 +73,6 @@ main :: proc() {
         "app.so",
     })
     thread.create_and_start_with_data(&library_monitor, monitor.thread_proc)
-    // } else when ODIN_OS == .Windows {
-    //     handle := windows.FindFirstChangeNotificationW(
-    //         windows.utf8_to_wstring("bin"),
-    //         false,
-    //         windows.FILE_NOTIFY_CHANGE_LAST_WRITE,
-    //     )
-    //     defer windows.FindCloseChangeNotification(handle)
-
-    //     data.handle = &handle
-    //     thread.create_and_start_with_data(&data, monitor_thread)
-    // }
 
     win.initialize_windowing()
     window := win.create(640, 480, "Vulkan Window")
