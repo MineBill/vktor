@@ -7,6 +7,18 @@ vars:
 
 tasks:
 
+  build:
+    cmds:
+      - |
+        odin build src -build-mode:shared -define:VALIDATION=true \
+        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:none -use-separate-modules \
+        -collection:packages=packages -define:GLFW_SHARED=true \
+        -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
+    sources:
+      - src/**/*.odin
+    generates:
+      - bin/app.dll
+
   build-shaders:
     aliases: [a2]
     cmds:
@@ -23,19 +35,6 @@ tasks:
       - bin/assets/shaders/Builtin.Object.spv
       - bin/assets/shaders/Builtin.Cubemap.spv
 
-  build:
-    cmds:
-      - |
-        odin build src -build-mode:shared -define:VALIDATION=true \
-        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:none -use-separate-modules \
-        -collection:packages=packages -define:GLFW_SHARED=true \
-        -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
-    sources:
-      - src/**/*.odin
-    generates:
-      - bin/app.dll
-
-
   build-loader:
     cmds:
       - |
@@ -50,3 +49,9 @@ tasks:
     deps: [build-loader, build, build-shaders]
     cmds:
       - ./loader{{exeExt}}
+
+  debugger:
+    platforms: [windows]
+    deps: [build-loader, build, build-shaders]
+    cmds:
+      - raddbg.exe --profile:vulkan_test.raddbgprofile
