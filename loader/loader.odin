@@ -75,7 +75,7 @@ main :: proc() {
     thread.create_and_start_with_data(&library_monitor, monitor.thread_proc)
 
     win.initialize_windowing()
-    window := win.create(640, 480, "Vulkan Window")
+    window := win.create(640 * 2, 480 * 1.5, "Vulkan Window")
 
     mem := symbols.init(window.handle)
 

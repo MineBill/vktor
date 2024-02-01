@@ -6,6 +6,8 @@ import "core:c"
 import "core:strings"
 import "core:fmt"
 
+FLOATING :: #config(FLOATING, true)
+
 Window :: struct {
     handle:        glfw.WindowHandle,
     width, height: int,
@@ -32,9 +34,26 @@ create :: proc(width, height: int, title: cstring) -> (window: Window) {
 
     glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
     glfw.WindowHint(glfw.RESIZABLE, 1)
-
+    when FLOATING {
         glfw.WindowHint(glfw.FLOATING, 1)
-    window.handle = glfw.CreateWindow(cast(c.int)width, cast(c.int)height, title, nil, nil)
+    }
+    // glfw.WindowHint(glfw.DECORATED, 1)
+    glfw.WindowHint(glfw.MAXIMIZED, 0)
+
+
+    width := cast(c.int)width
+    height := cast(c.int)height
+    window.handle = glfw.CreateWindow(width, height, title, nil, nil)
+
+    monitor := glfw.GetPrimaryMonitor()
+
+    mode := glfw.GetVideoMode(monitor)
+    log.debugf("Current video mode: %v", mode^)
+
+    x := mode.width / 2 - width / 2
+    y := mode.height / 2 - height / 2
+    log.debugf("Setting window position to (%v, %v)", x, y)
+    glfw.SetWindowPos(window.handle, x, y)
     return
 }
 

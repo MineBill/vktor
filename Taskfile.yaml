@@ -16,6 +16,8 @@ tasks:
         -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
     sources:
       - src/**/*.odin
+      - window/**/*.odin
+      - monitor/**.*.odin
     generates:
       - bin/app.dll
 
@@ -42,6 +44,8 @@ tasks:
         -o:none -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
     sources:
       - loader/**/*.odin
+      - window/**/*.odin
+      - monitor/**.*.odin
     generates:
       - loader{{exeExt}}
 
