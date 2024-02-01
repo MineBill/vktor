@@ -226,7 +226,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         case MousePositionEvent:
             delta_mouse := a.pos - mouse
             if app.mouse_locked {
-                SPEED :: 100
+                SPEED :: 50
                 app.camera.euler_angles.xy += delta_mouse.yx * SPEED * f32(delta)
             }
 
@@ -820,8 +820,8 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
 
             vertices := make([]Vertex, len(position_data) / 3)
 
-            log.debugf("Normal count: %v", len(normal_data))
-            log.debugf("Posiiton count: %v", len(position_data))
+            log.debugf("\tNormal count: %v", len(normal_data))
+            log.debugf("\tPosiiton count: %v", len(position_data))
 
             vi := 0
             ti := 0
@@ -862,6 +862,7 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
                 if material.has_pbr_metallic_roughness {
                     aa: if material.pbr_metallic_roughness.base_color_texture.texture != nil {
                         texture := material.pbr_metallic_roughness.base_color_texture.texture
+                        log.debugf("\t\tLoading albedo texture '%v' from memory", texture.image_.name)
                         buffer := texture.image_.buffer_view
                         color_base_data := buffer.buffer.data
                         color_offset := buffer.offset
@@ -874,6 +875,7 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
 
                         // NOTE(minebill): Do proper checking here
                         if texture == nil do break aa
+                        log.debugf("\t\tLoading normal texture '%v' from memory", texture.image_.name)
                         buffer = texture.image_.buffer_view
                         color_base_data = buffer.buffer.data
                         color_offset = buffer.offset
