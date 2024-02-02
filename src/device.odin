@@ -19,6 +19,8 @@ Device :: struct {
     graphics_queue:  vk.Queue,
     present_queue:   vk.Queue,
     properties:      vk.PhysicalDeviceProperties,
+
+    msaa_samples:    vk.SampleCountFlags,
 }
 
 create_device :: proc(window: glfw.WindowHandle, dbg: ^Debug_Context) -> (device: Device) {
@@ -32,6 +34,8 @@ create_device :: proc(window: glfw.WindowHandle, dbg: ^Debug_Context) -> (device
     }
 
     pick_physical_device(&device)
+
+    device.msaa_samples = device_get_max_usable_sample_count(&device)
 
     split_version :: proc(version: u32) -> (major, minor, patch: u32) {
         major = version >> 22 & 0x000000ff
@@ -64,12 +68,18 @@ destroy_device :: proc(device: ^Device) {
     vk.DestroyInstance(device.instance, nil)
 }
 
-device_create_descriptor_pool :: proc(device: ^Device, count: u32, sizes: []vk.DescriptorPoolSize) -> (pool: vk.DescriptorPool) {
+device_create_descriptor_pool :: proc(
+    device: ^Device,
+    count: u32,
+    sizes: []vk.DescriptorPoolSize,
+    flags := vk.DescriptorPoolCreateFlags{},
+) -> (pool: vk.DescriptorPool) {
     pool_info := vk.DescriptorPoolCreateInfo {
         sType         = vk.StructureType.DESCRIPTOR_POOL_CREATE_INFO,
         poolSizeCount = u32(len(sizes)),
         pPoolSizes    = raw_data(sizes),
         maxSets       = count,
+        flags = flags,
     }
 
     vk_check(vk.CreateDescriptorPool(device.device, &pool_info, nil, &pool))
@@ -281,14 +291,10 @@ device_find_memory_type :: proc(
 ) -> u32 {
     props: vk.PhysicalDeviceMemoryProperties
     vk.GetPhysicalDeviceMemoryProperties(device.physical_device, &props)
-    // log.debugf("Required Properties: %#v", properties)
-    // log.debugf("Required bit: %b", type_filter)
 
     for i := u32(0); i < props.memoryTypeCount; i += 1 {
-        // log.debugf("type_filter: %b | u32(1 << i): %b", type_filter, u32(i >> 1))
         type := props.memoryTypes[i]
-        if (type_filter & u32(i >> 1) == 1) && ((type.propertyFlags & properties) == properties) {
-            // log.info("FOUND IT")
+        if (type_filter & u32(i << 1) != 0) && ((type.propertyFlags & properties) == properties) {
             return i
         }
     }
@@ -337,7 +343,6 @@ pick_physical_device :: proc(device: ^Device) {
     for dev in devices {
         if is_device_suitable(dev, device.surface) {
             device.physical_device = dev
-
             vk.GetPhysicalDeviceProperties(device.physical_device, &device.properties)
             return
         }
@@ -370,16 +375,18 @@ is_device_suitable :: proc(device: vk.PhysicalDevice, surface: vk.SurfaceKHR) ->
 Queue_Family_Indices :: struct {
     graphics_family: Maybe(int),
     present_family:  Maybe(int),
+    compute_family:  Maybe(int),
 }
 
 is_queue_family_complete :: proc(using family: Queue_Family_Indices) -> bool {
     _, ok := family.graphics_family.?
     _, ok2 := family.present_family.?
-    return ok && ok2
+    _, ok3 := family.compute_family.?
+    return ok && ok2 && ok3
 }
 
 get_unique_queue_families :: proc(using indices: Queue_Family_Indices) -> [1]u32 {
-    graphics, present := cast(u32)graphics_family.(int), cast(u32)present_family.(int)
+    graphics, present, compute := cast(u32)graphics_family.(int), cast(u32)present_family.(int), cast(u32)compute_family.(int)
     if graphics == present {
         return {graphics}
     }
@@ -404,6 +411,10 @@ get_queue_families :: proc(
     for property, i in properties {
         if vk.QueueFlag.GRAPHICS in property.queueFlags {
             indices.graphics_family = i
+        }
+
+        if vk.QueueFlag.COMPUTE in property.queueFlags {
+            indices.compute_family = i
         }
 
         present_support: b32 = false
@@ -445,6 +456,7 @@ create_logical_device :: proc(device: ^Device) {
 
     device_features := vk.PhysicalDeviceFeatures {
         samplerAnisotropy = true,
+        sampleRateShading = true,
     }
 
     create_info := vk.DeviceCreateInfo {
@@ -650,4 +662,28 @@ check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
     }
 
     return true
+}
+
+device_get_max_usable_sample_count :: proc(device: ^Device) -> (flags: vk.SampleCountFlags) {
+    counts := device.properties.limits.framebufferColorSampleCounts & device.properties.limits.framebufferDepthSampleCounts
+    if ._64 in counts {
+        return {._64}
+    }
+    if ._32 in counts {
+        return {._32}
+    }
+    if ._16 in counts {
+        return {._16}
+    }
+    if ._8 in counts {
+        return {._8}
+    }
+    if ._4 in counts {
+        return {._4}
+    }
+    if ._2 in counts {
+        return {._2}
+    }
+
+    return {._1}
 }

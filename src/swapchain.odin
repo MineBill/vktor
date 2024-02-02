@@ -9,6 +9,7 @@ Swapchain :: struct {
     framebuffers:               [dynamic]vk.Framebuffer,
     renderpass:                 vk.RenderPass,
     depth_image:                Image,
+    color_image:                Image,
     swapchain_images:           [dynamic]vk.Image,
     swapchain_image_views:      [dynamic]vk.ImageView,
     device:                     ^Device,
@@ -18,9 +19,6 @@ Swapchain :: struct {
     render_finished_semaphores: []vk.Semaphore,
     in_flight_fences:           []vk.Fence,
     images_in_flight:           []vk.Fence,
-    // image_available_semaphore:  vk.Semaphore,
-    // render_finished_semaphore:  vk.Semaphore,
-    // in_flight_fence:            vk.Fence,
     current_frame:              int,
 
     color_format:               vk.Format,
@@ -38,7 +36,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 
-    image_count := details.capabilities.minImageCount + 1
+    image_count := details.capabilities.minImageCount + 0
     if details.capabilities.maxImageCount > 0 && image_count > details.capabilities.maxImageCount {
         image_count = details.capabilities.maxImageCount
     }
@@ -84,6 +82,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     )
 
     create_image_views(swapchain)
+    create_color_resource(swapchain)
     create_depth_resources(swapchain)
     create_render_pass(swapchain)
     create_framebuffers(swapchain)
@@ -102,6 +101,7 @@ destroy_swapchain :: proc(using swapchain: ^Swapchain) {
     }
     delete(swapchain_image_views)
 
+    image_destroy(&swapchain.color_image)
     image_destroy(&swapchain.depth_image)
 
     vk.DestroySwapchainKHR(device.device, swapchain_handle, nil)
@@ -214,7 +214,7 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.IMMEDIATE {
+        if mode == vk.PresentModeKHR.FIFO_RELAXED {
             return mode
         }
     }
@@ -257,25 +257,21 @@ create_image_views :: proc(using swapchain: ^Swapchain) {
 }
 
 create_render_pass :: proc(using swapchain: ^Swapchain) {
-    attachment := vk.AttachmentDescription {
+    samples := device_get_max_usable_sample_count(swapchain.device)
+    color_attachment := vk.AttachmentDescription {
         format = swapchain_image_format,
-        samples = {vk.SampleCountFlag._1},
+        samples = samples,
         loadOp = vk.AttachmentLoadOp.CLEAR,
-        storeOp = vk.AttachmentStoreOp.STORE,
+        storeOp = vk.AttachmentStoreOp.DONT_CARE,
         stencilLoadOp = vk.AttachmentLoadOp.DONT_CARE,
         stencilStoreOp = vk.AttachmentStoreOp.DONT_CARE,
         initialLayout = vk.ImageLayout.UNDEFINED,
-        finalLayout = vk.ImageLayout.PRESENT_SRC_KHR,
-    }
-
-    attachment_ref := vk.AttachmentReference {
-        attachment = 0,
-        layout     = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        finalLayout = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
     }
 
     depth_attachment := vk.AttachmentDescription {
         format = swapchain.depth_image.format,
-        samples = {._1},
+        samples = samples,
         loadOp = .CLEAR,
         storeOp = .DONT_CARE,
         stencilLoadOp = .DONT_CARE,
@@ -284,28 +280,50 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
         finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     }
 
+    color_resolve_attachment := vk.AttachmentDescription {
+        format = swapchain.color_format,
+        samples = {._1},
+        loadOp = .DONT_CARE,
+        storeOp = .STORE,
+        stencilLoadOp = .DONT_CARE,
+        stencilStoreOp = .DONT_CARE,
+        initialLayout = .UNDEFINED,
+        finalLayout = .PRESENT_SRC_KHR,
+    }
+
+    color_attachment_ref := vk.AttachmentReference {
+        attachment = 0,
+        layout     = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+    }
+
     depth_attachment_ref := vk.AttachmentReference {
         attachment = 1,
         layout     = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     }
 
+    color_resolve_ref := vk.AttachmentReference {
+        attachment = 2,
+        layout = .COLOR_ATTACHMENT_OPTIMAL,
+    }
+
     subpass := vk.SubpassDescription {
         pipelineBindPoint       = vk.PipelineBindPoint.GRAPHICS,
         colorAttachmentCount    = 1,
-        pColorAttachments       = &attachment_ref,
+        pColorAttachments       = &color_attachment_ref,
         pDepthStencilAttachment = &depth_attachment_ref,
+        pResolveAttachments     = &color_resolve_ref,
     }
 
     dependency := vk.SubpassDependency {
         srcSubpass = vk.SUBPASS_EXTERNAL,
         dstSubpass = 0,
         srcStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        srcAccessMask = {},
+        srcAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
         dstStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
         dstAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
 
-    attachments := []vk.AttachmentDescription{attachment, depth_attachment}
+    attachments := []vk.AttachmentDescription{color_attachment, depth_attachment, color_resolve_attachment}
 
     render_pass_create_info := vk.RenderPassCreateInfo {
         sType           = vk.StructureType.RENDER_PASS_CREATE_INFO,
@@ -328,6 +346,19 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
     }
 }
 
+create_color_resource :: proc(swapchain: ^Swapchain) {
+    swapchain.color_image = image_create(
+        swapchain.device,
+        swapchain.extent.width,
+        swapchain.extent.height,
+        1, swapchain.color_format,
+        .OPTIMAL,
+        {.TRANSIENT_ATTACHMENT, .COLOR_ATTACHMENT},
+        samples = device_get_max_usable_sample_count(swapchain.device))
+
+    image_view_create(&swapchain.color_image, swapchain.color_format, {.COLOR})
+}
+
 create_depth_resources :: proc(swapchain: ^Swapchain) {
     extent := swapchain.extent
     format := find_supported_format(
@@ -346,6 +377,7 @@ create_depth_resources :: proc(swapchain: ^Swapchain) {
         format,
         .OPTIMAL,
         {.DEPTH_STENCIL_ATTACHMENT},
+        samples = device_get_max_usable_sample_count(swapchain.device),
     )
     image_view_create(&swapchain.depth_image, format, {.DEPTH})
 }
@@ -376,7 +408,7 @@ create_framebuffers :: proc(using swapchain: ^Swapchain) {
     )
 
     for view, i in swapchain_image_views {
-        attachments := []vk.ImageView{view, swapchain.depth_image.view}
+        attachments := []vk.ImageView{color_image.view, swapchain.depth_image.view, view}
 
         framebuffer_create_info := vk.FramebufferCreateInfo {
             sType           = vk.StructureType.FRAMEBUFFER_CREATE_INFO,

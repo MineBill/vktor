@@ -277,6 +277,7 @@ create_cubemap_pipeline :: proc(pipeline: ^Cubemap_Pipeline) {
 
     rasterizer_create_info := config.rasterization_info
     multisampling_create_info := config.multisample_info
+    multisampling_create_info.rasterizationSamples = device_get_max_usable_sample_count(pipeline.device)
     color_blending := config.colorblend_info
     color_blending.pAttachments = &config.colorblend_attachment_info
 

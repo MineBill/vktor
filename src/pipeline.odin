@@ -134,6 +134,9 @@ create_graphics_pipeline :: proc(
 
     rasterizer_create_info := config.rasterization_info
     multisampling_create_info := config.multisample_info
+    multisampling_create_info.rasterizationSamples = device_get_max_usable_sample_count(pipeline.device)
+    multisampling_create_info.sampleShadingEnable = true
+    multisampling_create_info.minSampleShading = 0.2
     color_blending := config.colorblend_info
     color_blending.pAttachments = &config.colorblend_attachment_info
 

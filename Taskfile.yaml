@@ -2,7 +2,7 @@
 version: '3'
 
 vars:
-  DEBUG: -debug
+  DEBUG:
   USE_TRACY: false
 
 tasks:
@@ -11,7 +11,7 @@ tasks:
     cmds:
       - |
         odin build src -build-mode:shared -define:VALIDATION=true \
-        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:none -use-separate-modules \
+        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:speed -use-separate-modules \
         -collection:packages=packages -define:GLFW_SHARED=true \
         -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
     sources:
@@ -41,7 +41,7 @@ tasks:
     cmds:
       - |
         odin build loader -use-separate-modules -collection:packages=packages \
-        -o:none -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
+        -o:speed -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
     sources:
       - loader/**/*.odin
       - window/**/*.odin

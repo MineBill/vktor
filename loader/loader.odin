@@ -21,9 +21,12 @@ import "core:thread"
 import "vendor:glfw"
 import "core:time"
 import "../monitor"
+import imgui "packages:odin-imgui"
+import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
+import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
 
 Symbol_Table :: struct {
-    init:     #type proc(win: glfw.WindowHandle) -> rawptr,
+    init:     #type proc(win: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr,
     update:   #type proc(memory: rawptr, delta: f64) -> bool,
     destroy:  #type proc(memory: rawptr),
     get_size: #type proc() -> int,
@@ -77,7 +80,21 @@ main :: proc() {
     win.initialize_windowing()
     window := win.create(640 * 2, 480 * 1.5, "Vulkan Window")
 
-    mem := symbols.init(window.handle)
+    // ImGui Initialization
+    imgui.CHECKVERSION()
+    imgui.CreateContext(nil)
+    imgui_ctx := imgui.GetCurrentContext()
+
+    io := imgui.GetIO()
+    io.ConfigFlags += {.DockingEnable}
+    // io.ConfigFlags += {.ViewportsEnable}
+
+    style := imgui.GetStyle()
+    imgui.StyleColorsDark(style)
+
+    imgui_glfw.InitForVulkan(window.handle, false)
+
+    mem := symbols.init(window.handle, imgui_ctx)
 
     start_time := time.now()
     main_loop: for !win.should_close(window) {

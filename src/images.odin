@@ -140,7 +140,7 @@ cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) ->
     }
     vk.UnmapMemory(device.device, staging.memory)
 
-    mip_levels := cast(u32)math.floor(math.log2(cast(f32)max(last_width, last_height))) + 1
+    mip_levels := u32(1)
     image = image_create(
         device, 
         u32(last_width), u32(last_height),
@@ -168,6 +168,7 @@ image_create :: proc(
     usage: vk.ImageUsageFlags,
     flags := vk.ImageCreateFlags{},
     layer_count: u32 = 1,
+    samples: vk.SampleCountFlags = {._1},
 ) -> (image: Image) {
     image.device = device
     image.mip_levels = mip_levels
@@ -191,7 +192,7 @@ image_create :: proc(
         initialLayout = .UNDEFINED,
         usage = usage,
         sharingMode = .EXCLUSIVE,
-        samples = {._1},
+        samples = samples,
         flags = flags,
     }
 

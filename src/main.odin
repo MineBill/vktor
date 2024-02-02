@@ -18,6 +18,9 @@ import "core:image/png"
 import stbi "vendor:stb/image"
 import "../monitor"
 // import tracy "packages:odin-tracy"
+import imgui "packages:odin-imgui"
+import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
+import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -89,6 +92,8 @@ Application :: struct {
     shader_monitor:             monitor.Monitor,
     thread:                     ^thread.Thread,
 
+    imgui_descriptor_pool:      vk.DescriptorPool,
+
     cubemap_pipeline:       Cubemap_Pipeline,
 
     scene_data:             Scene_Data,
@@ -97,8 +102,9 @@ Application :: struct {
 }
 
 @(export)
-init :: proc(window: glfw.WindowHandle) -> rawptr {
+init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     // tracy.ZoneN("Application Init")
+    glfw.SwapInterval(1)
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
@@ -152,6 +158,48 @@ init :: proc(window: glfw.WindowHandle) -> rawptr {
     cubemap_init(&app.cubemap_pipeline, &app.device, &app.swapchain)
 
     app.command_buffers = create_command_buffers(&app.device, MAX_FRAMES_IN_FLIGHT)
+
+    indices := get_queue_families(app.device.physical_device, app.device.surface)
+
+    // ImGui Initialization
+    imgui.SetCurrentContext(imgui_ctx)
+    imgui_glfw.InstallCallbacks(window)
+    b := imgui_vulkan.LoadFunctions(proc "c" (name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
+        // NOTE(minebill): Odin recommends not to use auto_cast but eh.
+        return auto_cast glfw.GetInstanceProcAddress(auto_cast user_data, name)
+    }, app.device.instance)
+    log.debugf("imgui_vulkan.LoadFunction returned %v", b)
+
+    app.imgui_descriptor_pool = device_create_descriptor_pool(&app.device, 1, {
+        {type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
+    }, {.FREE_DESCRIPTOR_SET})
+
+    imgui_init := imgui_vulkan.InitInfo {
+        Instance = app.device.instance,
+        PhysicalDevice = app.device.physical_device,
+        Device = app.device.device,
+        QueueFamily = u32(indices.graphics_family.?),
+        Queue = app.device.graphics_queue,
+        PipelineCache = 0, // NOTE(minebill): We don't use pipeline caches right now.
+        DescriptorPool = app.imgui_descriptor_pool,
+        Subpass = 0,
+        MinImageCount = 2,
+        ImageCount = 2,
+        MSAASamples = app.device.msaa_samples,
+
+        // Dynamic Rendering (Optional)
+        UseDynamicRendering = false,
+
+        // Allocation, Debugging
+        Allocator = nil,
+        CheckVkResultFn = proc"c"(result: vk.Result) {
+            if result != .SUCCESS {
+                context = runtime.default_context()
+                fmt.eprintln("Vulkan error from imgui", result)
+            }
+        },
+    }
+    imgui_vulkan.Init(&imgui_init, app.swapchain.renderpass)
 
     // app.vertices = []Vertex {
     //     {{-0.5, -0.5,  0.0}, {1.0, 0.0, 1.0}, {1.0, 0.0}},
@@ -226,7 +274,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         case MousePositionEvent:
             delta_mouse := a.pos - mouse
             if app.mouse_locked {
-                SPEED :: 50
+                SPEED :: 10
                 app.camera.euler_angles.xy += delta_mouse.yx * SPEED * f32(delta)
             }
 
@@ -255,9 +303,9 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
-    if delta > 0.01 {
-        log.warnf("Very high delta: %v", delta)
-    }
+    // if delta > 0.01 {
+    //     log.warnf("Very high delta: %v", delta)
+    // }
 
     @(static)
     time_count := f32(0.0)
@@ -275,7 +323,30 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     // light.position.y = math.sin(t * 1) * 1
     light.color = vec4{1, 1, 1, 0}
 
+    imgui_vulkan.NewFrame()
+    imgui_glfw.NewFrame()
+    imgui.NewFrame()
+
+    @static show_demo := true
+    imgui.ShowDemoWindow(&show_demo)
+
+    if imgui.BeginMainMenuBar() {
+        imgui.TextUnformatted(fmt.ctprintf("FPS: %v", 1 / delta))
+    }
+    imgui.EndMainMenuBar()
+
+    imgui.DockSpaceOverViewportEx(imgui.GetMainViewport(), {.PassthruCentralNode}, nil)
+
+    if imgui.Begin("Pepegas", nil, {}) {
+    }
+    imgui.End()
+
+    imgui.Render()
+
     draw_frame(app)
+
+    imgui.EndFrame()
+    imgui.UpdatePlatformWindows()
 
     flush_input()
     event_context_clear(&app.event_context)
@@ -299,6 +370,9 @@ destroy :: proc(mem: rawptr) {
     vk.DeviceWaitIdle(app.device.device)
 
     monitor.deinit(&app.shader_monitor)
+
+    imgui_vulkan.Shutdown()
+    device_destroy_descriptor_pool(&app.device, app.imgui_descriptor_pool)
 
     scene_destroy(&app.scene)
 
@@ -406,7 +480,7 @@ save_screenshot :: proc(app: ^Application) {
 
     _screenshot_saver :: proc(data: rawptr) {
         work_data := cast(^Work_Data)data
-        log.info("Saving screenshot")
+        context.logger = work_data.logger
 
         now := time.now()
         year, month, day := time.date(now)
@@ -414,8 +488,9 @@ save_screenshot :: proc(app: ^Application) {
         path := fmt.ctprintf("screenshots/%v-%v-%v_%v-%v.png", year, month, day, min, sec)
         stbi.write_png(path, i32(work_data.width), i32(work_data.height), 4, work_data.data, work_data.stride)
 
-        log.info("Finished")
+        log.infof("Screenshot save at '%v'", path)
 
+        image_destroy(&work_data.image)
         mem.free(work_data.data)
         free(work_data)
     }
@@ -424,13 +499,16 @@ save_screenshot :: proc(app: ^Application) {
         data: rawptr,
         width, height: i32,
         stride: i32,
+        image: Image,
+        logger: log.Logger,
     }
     work_data := new(Work_Data)
     work_data.data, _ = mem.alloc(int(subresource_layout.size))
     mem.copy(work_data.data, data, int(subresource_layout.size))
     work_data.width = i32(extent.width)
     work_data.height = i32(extent.height)
-    work_data.stride = i32(subresource_layout.rowPitch)
+    work_data.image = image
+    work_data.logger = context.logger
 
     thread.run_with_data(work_data, _screenshot_saver)
 }
@@ -690,6 +768,7 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     }
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
+    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.handle)
     {
 
@@ -712,7 +791,9 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         vk.CmdDraw(command_buffer, a.cubemap_pipeline.vertex_count, 1, 0, 0)
 
     }
+    */
 
+    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
     {
         for &model in a.scene.models {
@@ -722,7 +803,8 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 
             vk.CmdBindIndexBuffer(command_buffer, model.index_buffer.handle, 0, .UINT16)
 
-            // NOTE(minebill): This probably shouldn't happen every frame, right here
+            // NOTE(minebill):  This probably shouldn't happen every frame, right here
+            //                  but i do this anyway in case the material changes.
             mem.copy(
                 model.material.buffer,
                 &model.material.block,
@@ -758,6 +840,10 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         }
 
     }
+    */
+    
+    imgui_draw_data := imgui.GetDrawData()
+    imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
 
     vk.CmdEndRenderPass(command_buffer)
 

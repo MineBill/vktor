@@ -32,18 +32,22 @@ create :: proc(width, height: int, title: cstring) -> (window: Window) {
     window.height = height
     window.title = strings.clone_from_cstring(title)
 
+    major, minor, rev := glfw.GetVersion()
+    log.infof("GLFW version %v.%v.%v", major, minor, rev)
+
     glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
     glfw.WindowHint(glfw.RESIZABLE, 1)
     when FLOATING {
         glfw.WindowHint(glfw.FLOATING, 1)
     }
     // glfw.WindowHint(glfw.DECORATED, 1)
-    glfw.WindowHint(glfw.MAXIMIZED, 0)
+    glfw.WindowHint(glfw.MAXIMIZED, 1)
 
 
     width := cast(c.int)width
     height := cast(c.int)height
     window.handle = glfw.CreateWindow(width, height, title, nil, nil)
+
 
     monitor := glfw.GetPrimaryMonitor()
 
