@@ -7,6 +7,10 @@ vars:
 
 tasks:
 
+  test:
+    cmds:
+      - echo {{ "" | default ".bin" }}
+
   build:
     cmds:
       - |
@@ -41,18 +45,18 @@ tasks:
     cmds:
       - |
         odin build loader -use-separate-modules -collection:packages=packages \
-        -o:speed -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt}}
+        -o:speed -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt | default ".bin"}}
     sources:
       - loader/**/*.odin
       - window/**/*.odin
       - monitor/**.*.odin
     generates:
-      - loader{{exeExt}}
+      - loader{{exeExt | default ".bin"}}
 
   run:
     deps: [build-loader, build, build-shaders]
     cmds:
-      - ./loader{{exeExt}}
+      - ./loader{{exeExt | default ".bin"}}
 
   debugger:
     platforms: [windows]
