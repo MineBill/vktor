@@ -40,9 +40,6 @@ create :: proc(width, height: int, title: cstring) -> (window: Window) {
     when FLOATING {
         glfw.WindowHint(glfw.FLOATING, 1)
     }
-    // glfw.WindowHint(glfw.DECORATED, 1)
-    glfw.WindowHint(glfw.MAXIMIZED, 1)
-
 
     width := cast(c.int)width
     height := cast(c.int)height

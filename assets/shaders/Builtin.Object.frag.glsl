@@ -32,7 +32,7 @@ void main() {
 
     vec3 view_dir = normalize(scene_data.view_position.xyz - fragPos);
     vec3 reflected_light = reflect(-lightDir, norm);
-    float spec = pow(max(dot(view_dir, reflected_light), 0.0), 32);
+    float spec = pow(max(dot(view_dir, reflected_light), 0.0), 32) * material.roughness;
     vec3 specular = spec * scene_data.main_light.color.xyz;
 
     vec3 result = (ambient + diffuse + specular) * vec3(material.albedo_color);

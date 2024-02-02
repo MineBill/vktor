@@ -6,6 +6,17 @@ import stb "vendor:stb/image"
 import "core:os"
 import "core:math"
 import "core:mem"
+import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
+
+USING_IMGUI :: true
+
+when USING_IMGUI {
+    ImGui_Image :: struct {
+        ds: vk.DescriptorSet,
+    }
+} else {
+    ImGui_Image :: struct{}
+}
 
 Image :: struct {
     device:         ^Device,
@@ -18,6 +29,8 @@ Image :: struct {
     layer_count:    u32,
 
     view:           vk.ImageView,
+
+    extra:          ImGui_Image,
 }
 
 image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.ImageCreateFlags{}) -> (image: Image) {
@@ -392,7 +405,6 @@ cubemap_image_view_create :: proc(image: ^Image, aspect: vk.ImageAspectFlags) {
         image.mip_levels,
         image.format,
         aspect, .CUBE, 6)
-
     return
 }
 

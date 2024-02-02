@@ -93,18 +93,24 @@ Application :: struct {
     thread:                     ^thread.Thread,
 
     imgui_descriptor_pool:      vk.DescriptorPool,
+    imgui_image:                vk.DescriptorSet,
 
-    cubemap_pipeline:       Cubemap_Pipeline,
+    cubemap_pipeline:           Cubemap_Pipeline,
 
-    scene_data:             Scene_Data,
-    event_context:          Event_Context,
-    mouse_locked:           bool,
+    scene_data:                 Scene_Data,
+    event_context:              Event_Context,
+    mouse_locked:               bool,
+
+    // imgui_images:               map[vk.Image]vk.DescriptorSet,
+    imgui_views_to_process:     [dynamic]^Image,
 }
+
+g_app: ^Application
 
 @(export)
 init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     // tracy.ZoneN("Application Init")
-    glfw.SwapInterval(1)
+    // glfw.SwapInterval(1)
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
@@ -112,6 +118,7 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     }
 
     app := new(Application)
+    g_app = app
     app.window = window
     app.start_time = time.now()
 
@@ -168,10 +175,22 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
         // NOTE(minebill): Odin recommends not to use auto_cast but eh.
         return auto_cast glfw.GetInstanceProcAddress(auto_cast user_data, name)
     }, app.device.instance)
-    log.debugf("imgui_vulkan.LoadFunction returned %v", b)
 
-    app.imgui_descriptor_pool = device_create_descriptor_pool(&app.device, 1, {
-        {type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
+    // NOTE(minebill): Lol, vulkan is amazing!
+    //                 Reference: https://vkguide.dev/docs/new_chapter_2/vulkan_imgui_setup/
+    IMGUI_MAX :: 1000
+    app.imgui_descriptor_pool = device_create_descriptor_pool(&app.device, IMGUI_MAX, {
+        { .COMBINED_IMAGE_SAMPLER, IMGUI_MAX},
+        { .SAMPLER, IMGUI_MAX},
+        { .SAMPLED_IMAGE, IMGUI_MAX },
+        { .STORAGE_IMAGE, IMGUI_MAX },
+        { .UNIFORM_TEXEL_BUFFER, IMGUI_MAX },
+        { .STORAGE_TEXEL_BUFFER, IMGUI_MAX },
+        { .UNIFORM_BUFFER, IMGUI_MAX },
+        { .STORAGE_BUFFER, IMGUI_MAX },
+        { .UNIFORM_BUFFER_DYNAMIC, IMGUI_MAX },
+        { .STORAGE_BUFFER_DYNAMIC, IMGUI_MAX },
+        { .INPUT_ATTACHMENT, IMGUI_MAX },
     }, {.FREE_DESCRIPTOR_SET})
 
     imgui_init := imgui_vulkan.InitInfo {
@@ -201,6 +220,12 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     }
     imgui_vulkan.Init(&imgui_init, app.swapchain.renderpass)
 
+    for &image in app.imgui_views_to_process {
+        log.debugf("Processing image %#v", image)
+        image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
+    }
+    clear(&app.imgui_views_to_process)
+
     // app.vertices = []Vertex {
     //     {{-0.5, -0.5,  0.0}, {1.0, 0.0, 1.0}, {1.0, 0.0}},
     //     {{ 0.5, -0.5,  0.0}, {0.0, 1.0, 1.0}, {0.0, 0.0}},
@@ -222,6 +247,11 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
 
     app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
     image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
+    app.imgui_image = imgui_vulkan.AddTexture(
+        app.image.sampler,
+        app.image.view,
+        .SHADER_READ_ONLY_OPTIMAL)
+    append(&g_app.imgui_views_to_process, &app.image)
 
     create_uniform_buffers(app)
 
@@ -303,9 +333,14 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
-    // if delta > 0.01 {
-    //     log.warnf("Very high delta: %v", delta)
-    // }
+    if delta > 0.01 {
+        log.warnf("Very high delta: %v", delta)
+    }
+
+    // === START OF DRAWING ===
+    imgui_vulkan.NewFrame()
+    imgui_glfw.NewFrame()
+    imgui.NewFrame()
 
     @(static)
     time_count := f32(0.0)
@@ -320,15 +355,8 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     app.scene_data.view_position.xyz = app.camera.position
     light := &app.scene_data.main_light
     light.position = vec4{1, 1, 1, 0}
-    // light.position.y = math.sin(t * 1) * 1
+    light.position.y = math.sin(t * 1) * 1
     light.color = vec4{1, 1, 1, 0}
-
-    imgui_vulkan.NewFrame()
-    imgui_glfw.NewFrame()
-    imgui.NewFrame()
-
-    @static show_demo := true
-    imgui.ShowDemoWindow(&show_demo)
 
     if imgui.BeginMainMenuBar() {
         imgui.TextUnformatted(fmt.ctprintf("FPS: %v", 1 / delta))
@@ -337,12 +365,47 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
     imgui.DockSpaceOverViewportEx(imgui.GetMainViewport(), {.PassthruCentralNode}, nil)
 
-    if imgui.Begin("Pepegas", nil, {}) {
+    if imgui.Begin("Scene", nil, {}) {
+        if imgui.CollapsingHeader("Environment", {}) {
+        }
+
+        if imgui.CollapsingHeader("Scene Objects", {}) {
+            for &m in app.scene.models {
+                name := fmt.ctprintf("Model %v", m.name)
+                if imgui.TreeNode(name) {
+                    if imgui.TreeNode("Transform") {
+                        imgui.DragFloat3Ex("Translation", &m.translation, 0.01, min(f32), max(f32), "%f", {})
+                        // imgui.DragFloat4Ex("Rotation", &m.rotation, 0.01, min(f32), max(f32), "%f", {})
+                        imgui.TreePop()
+                    }
+                    if imgui.TreeNode("Material") {
+                        imgui.DragFloatEx("Roughness", &m.material.roughness_factor, 0.01, 0.0, 1.0, "%f", {})
+                        imgui.ColorEdit4("Albedo", &m.material.albedo_color, {})
+                        imgui.TextUnformatted("Albedo Image")
+                        imgui.Image(transmute(imgui.TextureID)m.material.albedo_image.extra.ds, vec2{100, 100})
+                        imgui.TextUnformatted("Normal Map")
+                        imgui.Image(transmute(imgui.TextureID)m.material.normal_map_image.extra.ds, vec2{100, 100})
+                        imgui.TreePop()
+                    }
+                    imgui.TreePop()
+                }
+            }
+        }
     }
     imgui.End()
 
-    imgui.Render()
+    if imgui.Begin("Viewport", nil, {}) {
+        imgui.Image(
+            transmute(imgui.TextureID)app.image.extra.ds, 
+            vec2{
+                cast(f32)app.swapchain.color_image.width, 
+                cast(f32)app.swapchain.color_image.height},
+        )
+    }
+    imgui.End()
 
+    // === END OF DRAWING ===
+    imgui.Render()
     draw_frame(app)
 
     imgui.EndFrame()
@@ -350,6 +413,15 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
     flush_input()
     event_context_clear(&app.event_context)
+
+    for &image in app.imgui_views_to_process {
+        // log.debugf("[FRAME]: Processing image %#v", image)
+        // if image.width != 1024 do continue
+        image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
+    }
+    clear(&app.imgui_views_to_process)
+
+    free_all(context.temp_allocator)
 
     return false
 }
@@ -768,7 +840,6 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     }
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
-    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.handle)
     {
 
@@ -791,9 +862,7 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         vk.CmdDraw(command_buffer, a.cubemap_pipeline.vertex_count, 1, 0, 0)
 
     }
-    */
 
-    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
     {
         for &model in a.scene.models {
@@ -840,7 +909,6 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         }
 
     }
-    */
     
     imgui_draw_data := imgui.GetDrawData()
     imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
@@ -876,7 +944,10 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
         log.debugf("Processing node %v", node.name)
         // if node.name != "Cube.002" do continue
         mesh := node.mesh
-        model := Model {}
+        // model := Model {}
+        append(&scene.models, Model{})
+        model := &scene.models[len(scene.models) - 1]
+        model.name = strings.clone_from(node.name)
 
         init_material(&app.device, &model.material, app.material_layout)
 
@@ -976,10 +1047,10 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
                     model.material.roughness_factor = material.pbr_metallic_roughness.roughness_factor
                 }
             }
-            update_material(&app.device, &model.material, albedo_data, {})
+            update_material(&app.device, &model.material, albedo_data, normal_map_data)
         }
 
-        append(&scene.models, model)
+        // append(&scene.models, model)
     }
 
     return
@@ -1051,12 +1122,13 @@ material_destroy :: proc(m: ^Material) {
 }
 
 update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map: []byte) {
-
     material.albedo_image = image_load_from_memory(device, albedo if len(albedo) != 0 else WHITE_TEXTURE)
     image_view_create(&material.albedo_image, material.albedo_image.format, {.COLOR})
+    append(&g_app.imgui_views_to_process, &material.albedo_image)
 
-    material.normal_map_image = image_load_from_memory(device, normal_map if len(normal_map) != 0 else WHITE_TEXTURE)
+    material.normal_map_image = image_load_from_memory(device, normal_map if len(normal_map) != 0 else DEFAULT_NORMAL_MAP)
     image_view_create(&material.normal_map_image, material.albedo_image.format, {.COLOR})
+    append(&g_app.imgui_views_to_process, &material.normal_map_image)
 
     buffer_info := vk.DescriptorBufferInfo {
         buffer = material.vk_buffer.handle,
@@ -1159,6 +1231,7 @@ create_material_set_layout :: proc(device: ^Device) -> (layout: vk.DescriptorSet
 
 
 Model :: struct {
+    name: string,
     vertex_buffer:  Buffer,
     index_buffer:   Buffer,
 
