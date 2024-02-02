@@ -35,6 +35,7 @@ pkgs.mkShell rec {
 # alsaLib
 # freetype
 # expat
+            go-task
             clang
             ripgrep
             glfw-wayland
