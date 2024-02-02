@@ -12,12 +12,10 @@ import "core:time"
 import gltf "vendor:cgltf"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-// import "core:sys/windows"
 import "core:thread"
 import "core:image/png"
 import stbi "vendor:stb/image"
 import "../monitor"
-// import tracy "packages:odin-tracy"
 import imgui "packages:odin-imgui"
 import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
@@ -237,7 +235,6 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     //     {{ 0.5,  0.5, +0.5}, {0.0, 1.0, 1.0}, {0.0, 1.0}},
     //     {{-0.5,  0.5, +0.5}, {1.0, 1.0, 1.0}, {1.0, 1.0}},
     // }
-
     // app.indices = []u32 {
     //     0, 1, 2, 2, 3, 0,
     //     4, 5, 6, 6, 7, 4,
@@ -358,8 +355,18 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     light.position.y = math.sin(t * 1) * 1
     light.color = vec4{1, 1, 1, 0}
 
+    @static show_demo := false
+
     if imgui.BeginMainMenuBar() {
         imgui.TextUnformatted(fmt.ctprintf("FPS: %v", 1 / delta))
+
+        if imgui.Button("Show Demo") {
+            show_demo = !show_demo
+        }
+    }
+     
+    if show_demo {
+        imgui.ShowDemoWindow(&show_demo)
     }
     imgui.EndMainMenuBar()
 
@@ -427,13 +434,24 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 }
 
 @(export)
-reloaded :: proc(mem: rawptr) {
+reloaded :: proc(mem: rawptr, imgui_ctx: ^imgui.Context) {
     app := cast(^Application)mem
+    log.infof("Reloaded")
+    g_app = app
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     vk.load_proc_addresses_instance(app.device.instance)
 
     setup_events(app.window, &app.event_context)
     // Restart background shader monitoring thread
+
+    monitor.init(&app.shader_monitor, "bin/assets/shaders", {
+        "Builtin.Object.spv",
+        "Builtin.Cubemap.spv",
+    })
+    thread.run_with_data(&app.shader_monitor, monitor.thread_proc)
+    imgui.SetCurrentContext(imgui_ctx)
+    imgui_glfw.RestoreCallbacks(app.window)
+    imgui_glfw.InstallCallbacks(app.window)
 }
 
 @(export)

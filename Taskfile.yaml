@@ -2,22 +2,24 @@
 version: '3'
 
 vars:
-  DEBUG:
+  USE_DEBUG: '{{if eq .DEBUG "1"}}-debug{{else}}{{end}}'
   USE_TRACY: false
+  DLL_EXT: '{{if eq OS "windows"}}dll{{else}}so{{end}}'
+  EXE_EXT: '{{exeExt | default ".bin"}}'
 
 tasks:
 
   test:
     cmds:
-      - echo {{ "" | default ".bin" }}
+      - echo {{.USE_DEBUG}} {{.DLL_EXT}} {{.EXE_EXT}}
 
   build:
     cmds:
       - |
         odin build src -build-mode:shared -define:VALIDATION=true \
-        -out:bin/app.{{if eq OS "windows"}}dll{{else}}so{{end}} -show-timings -o:speed -use-separate-modules \
+        -out:bin/app.{{.DLL_EXT}} -show-timings -o:none -use-separate-modules \
         -collection:packages=packages -define:GLFW_SHARED=true \
-        -define:TRACY_ENABLE={{.USE_TRACY}} {{.DEBUG}}
+        -define:TRACY_ENABLE={{.USE_TRACY}} {{.USE_DEBUG}}
     sources:
       - src/**/*.odin
       - window/**/*.odin
@@ -45,18 +47,18 @@ tasks:
     cmds:
       - |
         odin build loader -use-separate-modules -collection:packages=packages \
-        -o:speed -define:FLOATING=false -define:GLFW_SHARED=true {{.DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{exeExt | default ".bin"}}
+        -o:none -define:FLOATING=false -define:GLFW_SHARED=true {{.USE_DEBUG}} -define:TRACY_ENABLE={{.USE_TRACY}} -out:loader{{.EXE_EXT}}
     sources:
       - loader/**/*.odin
       - window/**/*.odin
       - monitor/**.*.odin
     generates:
-      - loader{{exeExt | default ".bin"}}
+      - loader{{.EXE_EXT}}
 
   run:
     deps: [build-loader, build, build-shaders]
     cmds:
-      - ./loader{{exeExt | default ".bin"}}
+      - ./loader{{.EXE_EXT}}
 
   debugger:
     platforms: [windows]

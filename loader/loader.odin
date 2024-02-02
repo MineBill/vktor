@@ -30,7 +30,7 @@ Symbol_Table :: struct {
     update:   #type proc(memory: rawptr, delta: f64) -> bool,
     destroy:  #type proc(memory: rawptr),
     get_size: #type proc() -> int,
-    reloaded: #type proc(memory: rawptr),
+    reloaded: #type proc(memory: rawptr, imgui_ctx: ^imgui.Context),
     __handle: dynlib.Library,
 }
 
@@ -117,7 +117,7 @@ main :: proc() {
             //     symbols.reloaded(mem)
             // }
             load_symbols(&symbols)
-            symbols.reloaded(mem)
+            symbols.reloaded(mem, imgui_ctx)
         }
 
         t := time.now()
