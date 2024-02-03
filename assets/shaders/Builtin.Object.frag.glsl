@@ -23,11 +23,12 @@ layout(location = 3) in vec3 fragPos;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec3 ambient = vec3(1, 0, 1) * 0.01;
+    vec3 tex = vec3(texture(albedo_map, fragTexCoord));
+
+    vec3 ambient = scene_data.ambient_color.rgb * scene_data.ambient_color.a * tex;
     vec3 norm = normalize(fragNormal);
     vec3 lightDir = normalize(scene_data.main_light.position.xyz - fragPos);
     float diff = max(dot(norm, lightDir), 0.0);
-    vec3 tex = vec3(texture(albedo_map, fragTexCoord));
     vec3 diffuse = diff * scene_data.main_light.color.xyz * tex;
 
     vec3 view_dir = normalize(scene_data.view_position.xyz - fragPos);
@@ -37,5 +38,6 @@ void main() {
 
     vec3 result = (ambient + diffuse + specular) * vec3(material.albedo_color);
     outColor = vec4(result, 1.0);
+    outColor.rgb = pow(outColor.rgb, vec3(1/2.2));
     // outColor = vec4(1, 0, 0, 1);
 }

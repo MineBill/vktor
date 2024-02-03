@@ -33,6 +33,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     present_mode := choose_swap_present_mode(details.present_modes)
     surface_format := choose_swap_surface_format(details.formats)
     swapchain.color_format = surface_format.format
+    log.debugf("using %v color format", surface_format)
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 

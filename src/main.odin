@@ -56,6 +56,7 @@ Main_Light :: struct {
 
 Scene_Data :: struct {
     view_position: vec4,
+    ambient_color: vec4,
     main_light: Main_Light,
 }
 
@@ -242,6 +243,9 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
 
     app.scene = scene_load_from_file(app, "assets/models/scene.glb")
 
+    app.scene_data.main_light.color = vec4{1, 1, 1, 1}
+    app.scene_data.main_light.position = vec4{1, 1, 1, 1}
+
     app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
     image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
     app.imgui_image = imgui_vulkan.AddTexture(
@@ -251,8 +255,6 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     append(&g_app.imgui_views_to_process, &app.image)
 
     create_uniform_buffers(app)
-
-    app.scene_data.main_light.color = vec4{1, 1, 1, 1}
 
     monitor.init(&app.shader_monitor, "bin/assets/shaders", {
         "Builtin.Object.spv",
@@ -350,10 +352,10 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     app.camera.position.y += up_down * f32(delta)
 
     app.scene_data.view_position.xyz = app.camera.position
-    light := &app.scene_data.main_light
-    light.position = vec4{1, 1, 1, 0}
-    light.position.y = math.sin(t * 1) * 1
-    light.color = vec4{1, 1, 1, 0}
+    // light := &app.scene_data.main_light
+    // light.position = vec4{1, 1, 1, 0}
+    // light.position.y = math.sin(t * 1) * 1
+    // light.color = vec4{1, 1, 1, 0}
 
     @static show_demo := false
 
@@ -374,6 +376,17 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
     if imgui.Begin("Scene", nil, {}) {
         if imgui.CollapsingHeader("Environment", {}) {
+            imgui.TextUnformatted("Color")
+            imgui.SameLine()
+            imgui.ColorEdit4("##main_light", &app.scene_data.main_light.color, {})
+
+            imgui.TextUnformatted("Light Position")
+            imgui.SameLine()
+            imgui.DragFloat4Ex("##main_light_pos", &app.scene_data.main_light.position, 0.01, min(f32), max(f32), "%.2f", {})
+
+            imgui.TextUnformatted("Ambient Color")
+            imgui.SameLine()
+            imgui.ColorEdit4("##ambient_light", &app.scene_data.ambient_color, {})
         }
 
         if imgui.CollapsingHeader("Scene Objects", {}) {

@@ -10,6 +10,7 @@ struct Main_Light {
 
 struct Scene_Data {
 	vec4 view_position;
+    vec4 ambient_color;
 	Main_Light main_light;
 };
 
