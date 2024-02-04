@@ -4,6 +4,7 @@ import "core:runtime"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+import vma "packages:odin-vma"
 
 REQUIRED_VULKAN_LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
 REQUIRED_DEVICE_EXTENSIONS :: []cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}

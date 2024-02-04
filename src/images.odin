@@ -7,6 +7,7 @@ import "core:os"
 import "core:math"
 import "core:mem"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
+import vma "packages:odin-vma"
 
 USING_IMGUI :: true
 
@@ -31,6 +32,7 @@ Image :: struct {
     view:           vk.ImageView,
 
     extra:          ImGui_Image,
+    allocation:     vma.Allocation,
 }
 
 image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.ImageCreateFlags{}) -> (image: Image) {
@@ -143,7 +145,7 @@ cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) ->
 
     data: rawptr
 
-    vk.MapMemory(device.device, staging.memory, 0, vk.DeviceSize(total_size), {}, &data)
+    buffer_map(&staging, &data)
     for i in 0..<LAYERS {
         // buffer_copy_data(&staging, texture_data[i][:layer_size])
         mem.copy(
@@ -151,7 +153,7 @@ cubemap_image_load_from_files :: proc(device: ^Device, file_names: [6]string) ->
             texture_data[i],
             int(layer_size))
     }
-    vk.UnmapMemory(device.device, staging.memory)
+    buffer_unmap(&staging)
 
     mip_levels := u32(1)
     image = image_create(
@@ -209,30 +211,43 @@ image_create :: proc(
         flags = flags,
     }
 
-    vk_check(vk.CreateImage(device.device, &image_info, nil, &image.handle))
-
-    memory_requirements: vk.MemoryRequirements
-    vk.GetImageMemoryRequirements(device.device, image.handle, &memory_requirements)
-
-    alloc_info := vk.MemoryAllocateInfo {
-        sType = vk.StructureType.MEMORY_ALLOCATE_INFO,
-        allocationSize = memory_requirements.size,
-        memoryTypeIndex = device_find_memory_type(
-            device,
-            memory_requirements.memoryTypeBits,
-            {.DEVICE_LOCAL}), // @Note: Should this be a parameter?
+    allocation_create_info := vma.AllocationCreateInfo {
+        usage = .AUTO,
+        flags = {.HOST_ACCESS_SEQUENTIAL_WRITE},
     }
+    vma.CreateImage(g_app.allocator, &image_info, &allocation_create_info, &image.handle, &image.allocation, nil)
 
-    vk_check(vk.AllocateMemory(device.device, &alloc_info, nil, &image.memory))
-    vk_check(vk.BindImageMemory(device.device, image.handle, image.memory, 0))
+    // memory_requirements: vk.MemoryRequirements
+    // vk.GetImageMemoryRequirements(device.device, image.handle, &memory_requirements)
+
+    // alloc_info := vk.MemoryAllocateInfo {
+    //     sType = vk.StructureType.MEMORY_ALLOCATE_INFO,
+    //     allocationSize = memory_requirements.size,
+    //     memoryTypeIndex = device_find_memory_type(
+    //         device,
+    //         memory_requirements.memoryTypeBits,
+    //         {.DEVICE_LOCAL}), // @Note: Should this be a parameter?
+    // }
+
+    // vk_check(vk.AllocateMemory(device.device, &alloc_info, nil, &image.memory))
+    // vk_check(vk.BindImageMemory(device.device, image.handle, image.memory, 0))
     return
 }
 
 image_destroy :: proc(image: ^Image) {
     vk.DestroyImageView(image.device.device, image.view, nil)
     vk.DestroySampler(image.device.device, image.sampler, nil)
-    vk.FreeMemory(image.device.device, image.memory, nil)
-    vk.DestroyImage(image.device.device, image.handle, nil)
+    // vk.FreeMemory(image.device.device, image.memory, nil)
+    // vk.DestroyImage(image.device.device, image.handle, nil)
+    vma.DestroyImage(g_app.allocator, image.handle, image.allocation)
+}
+
+image_map :: proc(image: ^Image, data: ^rawptr) {
+    vma.MapMemory(g_app.allocator, image.allocation, data)
+}
+
+image_unmap :: proc(image: ^Image) {
+    vma.UnmapMemory(g_app.allocator, image.allocation)
 }
 
 image_transition_layout :: proc(image: ^Image, old_layout, new_layout: vk.ImageLayout) {

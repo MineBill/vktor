@@ -1,0 +1,3 @@
+[submodule "packages/odin-vma"]
+	path = packages/odin-vma
+	url = https://github.com/DanielGavin/odin-vma

@@ -19,6 +19,7 @@ import "../monitor"
 import imgui "packages:odin-imgui"
 import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
+import vma "packages:odin-vma"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -108,6 +109,8 @@ Application :: struct {
     shadow_pass: Shadow_Pass,
 
     near_far: [2]f32,
+
+    allocator: vma.Allocator,
 }
 
 g_app: ^Application
@@ -141,6 +144,19 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     setup_events(window, &app.event_context)
 
     app.device = create_device(window, app.dbg_context)
+
+    funcs := vma.create_vulkan_functions()
+
+    allocator_info := vma.AllocatorCreateInfo {
+        vulkanApiVersion = vk.API_VERSION_1_3,
+        physicalDevice = app.device.physical_device,
+        device = app.device.device,
+        instance = app.device.instance,
+        pVulkanFunctions = &funcs,
+    }
+
+    vma.CreateAllocator(&allocator_info, &app.allocator)
+
     // app.swapchain = create_swapchain(&app.device)
     init_swapchain(&app.device, &app.swapchain)
 
@@ -528,6 +544,8 @@ destroy :: proc(mem: rawptr) {
     vk.DestroyDescriptorSetLayout(app.device.device, app.global_descriptor_layout, nil)
     vk.DestroyDescriptorSetLayout(app.device.device, app.material_layout, nil)
     destroy_swapchain(&app.swapchain)
+
+    vma.DestroyAllocator(app.allocator)
     destroy_device(&app.device)
 
     free(app.dbg_context)
@@ -608,7 +626,8 @@ save_screenshot :: proc(app: ^Application) {
     vk.GetImageSubresourceLayout(app.device.device, image.handle, &subresource, &subresource_layout)
 
     data: rawptr
-    vk.MapMemory(app.device.device, image.memory, 0, vk.DeviceSize(vk.WHOLE_SIZE), {}, &data)
+
+    image_map(&image, &data)
     data = rawptr(uintptr(data) + uintptr(subresource_layout.offset))
 
     _screenshot_saver :: proc(data: rawptr) {
@@ -688,12 +707,8 @@ create_uniform_buffers :: proc(app: ^Application) {
             {.HOST_VISIBLE, .HOST_COHERENT},
         )
 
-        vk.MapMemory(
-            app.device.device,
-            app.uniform_buffers[i].memory,
-            0,
-            vk.DeviceSize(size),
-            {},
+        buffer_map(
+            &app.uniform_buffers[i],
             &app.uniform_mapped_buffers[i],
         )
 
@@ -1155,7 +1170,7 @@ init_material :: proc(device: ^Device, material: ^Material, layout: vk.Descripto
         {.UNIFORM_BUFFER},
         {.HOST_VISIBLE, .HOST_COHERENT})
 
-    vk.MapMemory(device.device, material.vk_buffer.memory, 0, vk.DeviceSize(size), {}, &material.buffer)
+    buffer_map(&material.vk_buffer, &material.buffer)
 
     material.descriptor_pool = device_create_descriptor_pool(device, 1, {
         {type = vk.DescriptorType.UNIFORM_BUFFER, descriptorCount = 1},
@@ -1175,7 +1190,7 @@ init_material :: proc(device: ^Device, material: ^Material, layout: vk.Descripto
 }
 
 material_destroy :: proc(m: ^Material) {
-    vk.UnmapMemory(m.vk_buffer.device.device, m.vk_buffer.memory)
+    buffer_unmap(&m.vk_buffer)
     buffer_destroy(&m.vk_buffer)
 
     image_destroy(&m.albedo_image)

@@ -37,7 +37,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 
-    image_count := details.capabilities.minImageCount + 0
+    image_count := details.capabilities.minImageCount + 1
     if details.capabilities.maxImageCount > 0 && image_count > details.capabilities.maxImageCount {
         image_count = details.capabilities.maxImageCount
     }

@@ -139,12 +139,15 @@ create_cubemap_uniform_buffers :: proc(pipeline: ^Cubemap_Pipeline) {
             {.HOST_VISIBLE, .HOST_COHERENT},
         )
 
-        vk.MapMemory(
-            pipeline.device.device,
-            pipeline.uniform_buffers[i].memory,
-            0,
-            vk.DeviceSize(size),
-            {},
+        // vk.0MapMemory(
+        //     pipeline.device.device,
+        //     0,
+        //     vk.DeviceSize(size),
+        //     {},
+        // )
+
+        buffer_map(
+            &pipeline.uniform_buffers[i],
             &pipeline.uniform_mapped_buffers[i],
         )
 

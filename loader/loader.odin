@@ -127,11 +127,11 @@ main :: proc() {
         quit := symbols.update(mem, delta)
         if quit do break main_loop
 
-        TARGET :: 1.0 / 144.0
-        if delta < TARGET {
-            sleep := time.Duration((TARGET - delta) * f64(time.Second))
-            time.sleep(sleep)
-        }
+        // TARGET :: 1.0 / 144.0
+        // if delta < TARGET {
+        //     sleep := time.Duration((TARGET - delta) * f64(time.Second))
+        //     time.sleep(sleep)
+        // }
     }
 
     symbols.destroy(mem)

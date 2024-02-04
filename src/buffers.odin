@@ -2,11 +2,13 @@ package main
 
 import vk "vendor:vulkan"
 import "core:mem"
+import vma "packages:odin-vma"
 
 Buffer :: struct {
     device: ^Device,
     handle: vk.Buffer,
     memory: vk.DeviceMemory,
+    allocation: vma.Allocation,
 }
 
 Vertex_Buffer :: struct {
@@ -65,27 +67,27 @@ buffer_copy_vertices :: proc(buffer: ^Buffer, vertices: []Vertex) {
     size := vk.DeviceSize(size_of(Vertex) * len(vertices))
 
     data: rawptr
-    vk.MapMemory(buffer.device.device, buffer.memory, 0, size, {}, &data)
+    vma.MapMemory(g_app.allocator, buffer.allocation, &data)
     mem.copy(data, raw_data(vertices), int(size))
-    vk.UnmapMemory(buffer.device.device, buffer.memory)
+    vma.UnmapMemory(g_app.allocator, buffer.allocation)
 }
 
 buffer_copy_indices :: proc(buffer: ^Buffer, indices: []u32) {
     size := vk.DeviceSize(size_of(u32) * len(indices))
 
     data: rawptr
-    vk.MapMemory(buffer.device.device, buffer.memory, 0, size, {}, &data)
+    vma.MapMemory(g_app.allocator, buffer.allocation, &data)
     mem.copy(data, raw_data(indices), int(size))
-    vk.UnmapMemory(buffer.device.device, buffer.memory)
+    vma.UnmapMemory(g_app.allocator, buffer.allocation)
 }
 
 buffer_copy_data :: proc(buffer: ^Buffer, slice: []$T) {
     size := vk.DeviceSize(size_of(T) * len(slice))
 
     data: rawptr
-    vk.MapMemory(buffer.device.device, buffer.memory, 0, size, {}, &data)
+    vma.MapMemory(g_app.allocator, buffer.allocation, &data)
     mem.copy(data, raw_data(slice), int(size))
-    vk.UnmapMemory(buffer.device.device, buffer.memory)
+    vma.UnmapMemory(g_app.allocator, buffer.allocation)
 }
 
 // Should this take a device as well? Or is it ok to take one one
@@ -129,6 +131,14 @@ buffer_copy_to_image :: proc(source: ^Buffer, image: ^Image) {
     vk.CmdCopyBufferToImage(cmd, source.handle, image.handle, .TRANSFER_DST_OPTIMAL, 1, &region)
 }
 
+buffer_map :: proc(buffer: ^Buffer, data: ^rawptr) {
+    vma.MapMemory(g_app.allocator, buffer.allocation, data)
+}
+
+buffer_unmap :: proc(buffer: ^Buffer)  {
+    vma.UnmapMemory(g_app.allocator, buffer.allocation)
+}
+
 buffer_create :: proc(
     device: ^Device,
     size: u32,
@@ -143,27 +153,30 @@ buffer_create :: proc(
         sharingMode = vk.SharingMode.EXCLUSIVE,
     }
 
-    vk_check(vk.CreateBuffer(device.device, &buffer_info, nil, &buffer.handle))
-
-    memory_requirements: vk.MemoryRequirements
-    vk.GetBufferMemoryRequirements(buffer.device.device, buffer.handle, &memory_requirements)
-
-    alloc_info := vk.MemoryAllocateInfo {
-        sType = vk.StructureType.MEMORY_ALLOCATE_INFO,
-        allocationSize = memory_requirements.size,
-        memoryTypeIndex = device_find_memory_type(
-            buffer.device,
-            memory_requirements.memoryTypeBits,
-            mem_props),
+    ainfo := vma.AllocationCreateInfo {
+        usage = .AUTO,
+        flags = {.HOST_ACCESS_SEQUENTIAL_WRITE},
     }
+    vk_check(vma.CreateBuffer(g_app.allocator, &buffer_info, &ainfo, &buffer.handle, &buffer.allocation, nil))
 
-    vk_check(vk.AllocateMemory(buffer.device.device, &alloc_info, nil, &buffer.memory))
+    // memory_requirements: vk.MemoryRequirements
+    // vk.GetBufferMemoryRequirements(buffer.device.device, buffer.handle, &memory_requirements)
 
-    vk.BindBufferMemory(buffer.device.device, buffer.handle, buffer.memory, 0)
+    // alloc_info := vk.MemoryAllocateInfo {
+    //     sType = vk.StructureType.MEMORY_ALLOCATE_INFO,
+    //     allocationSize = memory_requirements.size,
+    //     memoryTypeIndex = device_find_memory_type(
+    //         buffer.device,
+    //         memory_requirements.memoryTypeBits,
+    //         mem_props),
+    // }
+
+    // vk_check(vk.AllocateMemory(buffer.device.device, &alloc_info, nil, &buffer.memory))
+
+    // vk.BindBufferMemory(buffer.device.device, buffer.handle, buffer.memory, 0)
     return
 }
 
 buffer_destroy :: proc(buffer: ^Buffer) {
-    vk.FreeMemory(buffer.device.device, buffer.memory, nil)
-    vk.DestroyBuffer(buffer.device.device, buffer.handle, nil)
+    vma.DestroyBuffer(g_app.allocator, buffer.handle, buffer.allocation)
 }

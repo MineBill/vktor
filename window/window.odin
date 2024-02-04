@@ -68,8 +68,8 @@ should_close :: proc(window: Window) -> bool {
 }
 
 update :: proc(window: ^Window) {
-    // glfw.PollEvents()
-    glfw.WaitEventsTimeout(1 / 144)
+    glfw.PollEvents()
+    // glfw.WaitEventsTimeout(1 / 44)
 }
 
 get_extent :: proc(window: ^Window) -> vk.Extent2D {
