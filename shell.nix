@@ -35,6 +35,9 @@ pkgs.mkShell rec {
 # alsaLib
 # freetype
 # expat
+            python3
+            python311Packages.ply
+
             go-task
             clang
             ripgrep

@@ -278,6 +278,12 @@ transition_image_layout :: proc(device: ^Device, image: vk.Image, mip_levels: u3
 
         source_stage = {.TRANSFER}
         dest_stage = {.FRAGMENT_SHADER}
+    } else if old_layout == .UNDEFINED && new_layout == .SHADER_READ_ONLY_OPTIMAL {
+        barrier.srcAccessMask = {.TRANSFER_READ}
+        barrier.dstAccessMask = {.MEMORY_READ}
+
+        source_stage = {.TRANSFER}
+        dest_stage = {.TRANSFER}
     } else if old_layout == .PRESENT_SRC_KHR && new_layout == .TRANSFER_SRC_OPTIMAL {
         barrier.srcAccessMask = {.MEMORY_READ}
         barrier.dstAccessMask = {.TRANSFER_READ}
@@ -296,6 +302,18 @@ transition_image_layout :: proc(device: ^Device, image: vk.Image, mip_levels: u3
 
         source_stage = {.TRANSFER}
         dest_stage = {.TRANSFER}
+    } else if old_layout == .COLOR_ATTACHMENT_OPTIMAL && new_layout == .SHADER_READ_ONLY_OPTIMAL {
+        barrier.srcAccessMask = {.COLOR_ATTACHMENT_WRITE}
+        barrier.dstAccessMask = {.SHADER_READ}
+
+        source_stage = {.COLOR_ATTACHMENT_OUTPUT}
+        dest_stage = {.FRAGMENT_SHADER}
+    } else if old_layout == .SHADER_READ_ONLY_OPTIMAL && new_layout == .COLOR_ATTACHMENT_OPTIMAL {
+        barrier.srcAccessMask = {.SHADER_READ}
+        barrier.dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
+
+        source_stage = {.FRAGMENT_SHADER}
+        dest_stage = {.COLOR_ATTACHMENT_OUTPUT}
     }
 
     vk.CmdPipelineBarrier(

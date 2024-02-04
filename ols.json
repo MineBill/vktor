@@ -7,10 +7,7 @@
         }
     ],
     "enable_document_symbols": true,
-    "enable_semantic_tokens": false,
     "enable_hover": true,
     "enable_snippets": true,
-    "checker_args": "-vet-semicolon",
-    "enable_fake_methods": false,
-    "enable_references": true
+    "checker_args": "",
 }

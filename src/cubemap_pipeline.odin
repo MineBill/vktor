@@ -64,24 +64,6 @@ cubemap_init :: proc(pipeline: ^Cubemap_Pipeline, device: ^Device, swapchain: ^S
 
     log.debugf("%v", pipeline.image.sampler)
 
-    // pipeline.images[.Front] = image_load_from_file(device, "assets/textures/skybox/front.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.Front] = image_view_create(&pipeline.images[.Front], .R8G8B8A8_SRGB, {.COLOR})
-
-    // pipeline.images[.Back] = image_load_from_file(device, "assets/textures/skybox/back.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.Back] = image_view_create(&pipeline.images[.Back], .R8G8B8A8_SRGB, {.COLOR})
-
-    // pipeline.images[.Up] = image_load_from_file(device, "assets/textures/skybox/top.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.Up] = image_view_create(&pipeline.images[.Up], .R8G8B8A8_SRGB, {.COLOR})
-
-    // pipeline.images[.Down] = image_load_from_file(device, "assets/textures/skybox/bottom.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.Down] = image_view_create(&pipeline.images[.Down], .R8G8B8A8_SRGB, {.COLOR})
-
-    // pipeline.images[.Right] = image_load_from_file(device, "assets/textures/skybox/right.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.right] = image_view_create(&pipeline.images[.right], .r8g8b8a8_srgb, {.color})
-
-    // pipeline.images[.Left] = image_load_from_file(device, "assets/textures/skybox/left.jpg", {.CUBE_COMPATIBLE})
-    // // pipeline.image_views[.Left] = image_view_create(&pipeline.images[.Left], .R8G8B8A8_SRGB, {.COLOR})
-
     vertices := []Simple_Vertext{
         {{-1.0,  1.0, -1.0,}},
         {{-1.0, -1.0, -1.0,}},

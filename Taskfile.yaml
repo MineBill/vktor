@@ -37,6 +37,10 @@ tasks:
       - glslc -fshader-stage=frag assets/shaders/Builtin.Cubemap.frag.glsl -o bin/assets/shaders/Builtin.Cubemap.frag.spv
       - glslc -fshader-stage=vert assets/shaders/Builtin.Cubemap.vert.glsl -o bin/assets/shaders/Builtin.Cubemap.vert.spv 
       - spirv-link bin/assets/shaders/Builtin.Cubemap.frag.spv bin/assets/shaders/Builtin.Cubemap.vert.spv -o bin/assets/shaders/Builtin.Cubemap.spv
+
+      - glslc -fshader-stage=frag assets/shaders/Builtin.ShadowPass.frag.glsl -o bin/assets/shaders/Builtin.ShadowPass.frag.spv
+      - glslc -fshader-stage=vert assets/shaders/Builtin.ShadowPass.vert.glsl -o bin/assets/shaders/Builtin.ShadowPass.vert.spv 
+      - spirv-link bin/assets/shaders/Builtin.ShadowPass.frag.spv bin/assets/shaders/Builtin.ShadowPass.vert.spv -o bin/assets/shaders/Builtin.ShadowPass.spv
     sources:
       - assets/shaders/**/*.glsl
     generates:

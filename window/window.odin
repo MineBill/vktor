@@ -45,6 +45,7 @@ create :: proc(width, height: int, title: cstring) -> (window: Window) {
     height := cast(c.int)height
     window.handle = glfw.CreateWindow(width, height, title, nil, nil)
 
+    // glfw.SwapInterval(1)
 
     monitor := glfw.GetPrimaryMonitor()
 

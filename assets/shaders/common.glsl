@@ -4,14 +4,16 @@ struct View_Data {
 };
 
 struct Main_Light {
-    vec4 position;
+    vec4 direction;
     vec4 color;
+
+    mat4 light_space_matrix;
 };
 
 struct Scene_Data {
-	vec4 view_position;
+    vec4 view_position;
     vec4 ambient_color;
-	Main_Light main_light;
+    Main_Light main_light;
 };
 
 struct Material {

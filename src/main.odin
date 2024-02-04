@@ -26,7 +26,7 @@ WINDOW_WIDTH :: 600
 WINDOW_HEIGHT :: 400
 WINDOW_TITLE :: "Vulkan"
 
-MAX_FRAMES_IN_FLIGHT :: 1
+MAX_FRAMES_IN_FLIGHT :: 2
 
 vec2 :: [2]f32
 vec3 :: [3]f32
@@ -50,8 +50,10 @@ Uniform_Buffer_Object :: struct {
 }
 
 Main_Light :: struct {
-    position: vec4,
+    direction: vec4,
     color: vec4,
+
+    light_space_matrix: mat4,
 }
 
 Scene_Data :: struct {
@@ -102,14 +104,16 @@ Application :: struct {
 
     // imgui_images:               map[vk.Image]vk.DescriptorSet,
     imgui_views_to_process:     [dynamic]^Image,
+
+    shadow_pass: Shadow_Pass,
+
+    near_far: [2]f32,
 }
 
 g_app: ^Application
 
 @(export)
 init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
-    // tracy.ZoneN("Application Init")
-    // glfw.SwapInterval(1)
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
@@ -169,6 +173,7 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
 
     // ImGui Initialization
     imgui.SetCurrentContext(imgui_ctx)
+    
     imgui_glfw.InstallCallbacks(window)
     b := imgui_vulkan.LoadFunctions(proc "c" (name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
         // NOTE(minebill): Odin recommends not to use auto_cast but eh.
@@ -244,7 +249,8 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     app.scene = scene_load_from_file(app, "assets/models/scene.glb")
 
     app.scene_data.main_light.color = vec4{1, 1, 1, 1}
-    app.scene_data.main_light.position = vec4{1, 1, 1, 1}
+    app.scene_data.main_light.direction = vec4{-1, -1, -1, 1}
+    app.near_far = [2]f32{1.0, 40.0}
 
     app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
     image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
@@ -254,11 +260,25 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
         .SHADER_READ_ONLY_OPTIMAL)
     append(&g_app.imgui_views_to_process, &app.image)
 
+    shadow_pass_init(&app.shadow_pass, &app.device, &app.swapchain)
+    app.shadow_pass.color_image.extra.ds = imgui_vulkan.AddTexture(
+        app.shadow_pass.color_image.sampler,
+        app.shadow_pass.color_image.view,
+        .SHADER_READ_ONLY_OPTIMAL,
+    )
+
     create_uniform_buffers(app)
+
+    // app.swapchain.color_image.extra.ds = imgui_vulkan.AddTexture(
+    //     app.swapchain.color_image.sampler,
+    //     app.swapchain.color_image.view,
+    //     .SHADER_READ_ONLY_OPTIMAL,
+    // )
 
     monitor.init(&app.shader_monitor, "bin/assets/shaders", {
         "Builtin.Object.spv",
         "Builtin.Cubemap.spv",
+        "Builtin.ShadowPass.spv",
     })
     thread.run_with_data(&app.shader_monitor, monitor.thread_proc)
 
@@ -332,10 +352,6 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
-    if delta > 0.01 {
-        log.warnf("Very high delta: %v", delta)
-    }
-
     // === START OF DRAWING ===
     imgui_vulkan.NewFrame()
     imgui_glfw.NewFrame()
@@ -360,7 +376,8 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     @static show_demo := false
 
     if imgui.BeginMainMenuBar() {
-        imgui.TextUnformatted(fmt.ctprintf("FPS: %v", 1 / delta))
+        imgui.TextUnformatted(fmt.ctprintf("Delta: %.5f", delta))
+        imgui.TextUnformatted(fmt.ctprintf("FPS: %v", int(1/delta)))
 
         if imgui.Button("Show Demo") {
             show_demo = !show_demo
@@ -382,7 +399,11 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
             imgui.TextUnformatted("Light Position")
             imgui.SameLine()
-            imgui.DragFloat4Ex("##main_light_pos", &app.scene_data.main_light.position, 0.01, min(f32), max(f32), "%.2f", {})
+            imgui.DragFloat4Ex("##main_light_dir", &app.scene_data.main_light.direction, 0.01, min(f32), max(f32), "%.2f", {})
+
+            imgui.TextUnformatted("Near Far")
+            imgui.SameLine()
+            imgui.DragFloat2Ex("##main_light_near_far", &app.near_far, 0.01, 0.0, 100.0, "%.2f", {})
 
             imgui.TextUnformatted("Ambient Color")
             imgui.SameLine()
@@ -414,15 +435,23 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     }
     imgui.End()
 
-    if imgui.Begin("Viewport", nil, {}) {
+    if imgui.Begin("Depth Pass", nil, {}) {
+        size := imgui.GetContentRegionAvail()
         imgui.Image(
-            transmute(imgui.TextureID)app.image.extra.ds, 
-            vec2{
-                cast(f32)app.swapchain.color_image.width, 
-                cast(f32)app.swapchain.color_image.height},
+            transmute(imgui.TextureID)app.shadow_pass.color_image.extra.ds,
+            size,
         )
     }
     imgui.End()
+
+    // if imgui.Begin("Viewport", nil, {}) {
+    //     size := imgui.GetContentRegionAvail()
+    //     imgui.Image(
+    //         transmute(imgui.TextureID)app.swapchain.color_image.extra.ds,
+    //         size,
+    //     )
+    // }
+    // imgui.End()
 
     // === END OF DRAWING ===
     imgui.Render()
@@ -488,6 +517,7 @@ destroy :: proc(mem: rawptr) {
     image_destroy(&app.image)
 
     cubemap_deinit(&app.cubemap_pipeline)
+    shadow_pass_deinit(&app.shadow_pass)
 
     vk.DeviceWaitIdle(app.device.device)
     free_command_buffers(&app.device, app.command_buffers)
@@ -517,7 +547,7 @@ save_screenshot :: proc(app: ^Application) {
         supports_blit = false
     }
 
-    vk.GetPhysicalDeviceFormatProperties(app.device.physical_device, .R8G8B8A8_UNORM, &format_properties)
+    vk.GetPhysicalDeviceFormatProperties(app.device.physical_device, .R8G8B8A8_SRGB, &format_properties)
     if .BLIT_DST not_in format_properties.optimalTilingFeatures {
         log.infof("Device does not support blitting to linear tiled images")
         supports_blit = false
@@ -534,7 +564,7 @@ save_screenshot :: proc(app: ^Application) {
         &app.device,
         extent.width, extent.height,
         1,
-        .R8G8B8A8_UNORM,
+        .R8G8B8A8_SRGB,
         .LINEAR,
         {.TRANSFER_DST},
     )
@@ -675,8 +705,8 @@ create_uniform_buffers :: proc(app: ^Application) {
 
         image_info := vk.DescriptorImageInfo {
             imageLayout = .READ_ONLY_OPTIMAL,
-            imageView   = app.image.view,
-            sampler     = app.image.sampler,
+            imageView   = app.shadow_pass.framebuffer_image.view,
+            sampler     = app.shadow_pass.framebuffer_image.sampler,
         }
 
         descriptor_writes := []vk.WriteDescriptorSet {
@@ -838,6 +868,8 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     if result != vk.Result.SUCCESS {
         log.error("Failed to begin command buffer")
     }
+
+    shadow_pass(&a.shadow_pass, command_buffer)
 
     clear_values := []vk.ClearValue {
         {color = {float32 = {0.01, 0.01, 0.01, 1.0}}},
@@ -1158,7 +1190,7 @@ update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map
     append(&g_app.imgui_views_to_process, &material.albedo_image)
 
     material.normal_map_image = image_load_from_memory(device, normal_map if len(normal_map) != 0 else DEFAULT_NORMAL_MAP)
-    image_view_create(&material.normal_map_image, material.albedo_image.format, {.COLOR})
+    image_view_create(&material.normal_map_image, material.normal_map_image.format, {.COLOR})
     append(&g_app.imgui_views_to_process, &material.normal_map_image)
 
     buffer_info := vk.DescriptorBufferInfo {
@@ -1197,6 +1229,15 @@ update_material :: proc(device: ^Device, material: ^Material, albedo, normal_map
             descriptorType = .COMBINED_IMAGE_SAMPLER,
             descriptorCount = 1,
             pImageInfo = &image_info,
+        },
+         {
+            sType = vk.StructureType.WRITE_DESCRIPTOR_SET,
+            dstSet = material.descriptor_set,
+            dstBinding = 2,
+            dstArrayElement = 0,
+            descriptorType = .COMBINED_IMAGE_SAMPLER,
+            descriptorCount = 1,
+            pImageInfo = &normal_map_info,
         },
     }
 

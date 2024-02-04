@@ -30,7 +30,7 @@ create_device :: proc(window: glfw.WindowHandle, dbg: ^Debug_Context) -> (device
 
     result := glfw.CreateWindowSurface(device.instance, window, nil, &device.surface)
     if result != vk.Result.SUCCESS {
-        log.error("Failed to create window surface")
+        log.error("Failed to create window surface", result)
     }
 
     pick_physical_device(&device)
@@ -686,4 +686,18 @@ device_get_max_usable_sample_count :: proc(device: ^Device) -> (flags: vk.Sample
     }
 
     return {._1}
+}
+
+device_create_descriptor_set_layout :: proc(
+    device: ^Device, 
+    bindings: []vk.DescriptorSetLayoutBinding
+) -> (layout: vk.DescriptorSetLayout) {
+    layout_info := vk.DescriptorSetLayoutCreateInfo {
+        sType        = vk.StructureType.DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        bindingCount = u32(len(bindings)),
+        pBindings    = raw_data(bindings),
+    }
+
+    vk_check(vk.CreateDescriptorSetLayout(device.device, &layout_info, nil, &layout))
+    return
 }
