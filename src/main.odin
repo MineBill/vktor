@@ -854,13 +854,14 @@ draw_frame :: proc(app: ^Application) {
     }
 
     if err != .SUCCESS {
+        log.errorf("ERR: %v", err)
         return
     }
 
     vk.ResetCommandBuffer(app.command_buffers[app.swapchain.current_frame], {})
-    record_command_buffer(app, image_index)
 
     update_uniform_buffer(app, u32(app.swapchain.current_frame))
+    record_command_buffer(app, image_index)
 
     swapchain_submit_command_buffers(
         &app.swapchain,

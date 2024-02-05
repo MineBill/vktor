@@ -152,7 +152,7 @@ swapchain_submit_command_buffers :: proc(swapchain: ^Swapchain, buffers: []vk.Co
     signal_semaphores: []vk.Semaphore =  {
         swapchain.render_finished_semaphores[swapchain.current_frame],
     }
-    flags := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
+    flags := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT, .ALL_GRAPHICS}
 
     submit_info := vk.SubmitInfo {
         sType                = vk.StructureType.SUBMIT_INFO,
@@ -202,7 +202,7 @@ swapchain_present :: proc(swapchain: ^Swapchain, image_index: u32) {
 choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
     for format in formats {
         if format.format == vk.Format.B8G8R8A8_SRGB &&
-           format.colorSpace == vk.ColorSpaceKHR.SRGB_NONLINEAR {
+           format.colorSpace == vk.ColorSpaceKHR.COLORSPACE_SRGB_NONLINEAR {
             return format
         }
     }
@@ -215,7 +215,7 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.IMMEDIATE {
+        if mode == vk.PresentModeKHR.FIFO {
             return mode
         }
     }
@@ -260,7 +260,7 @@ create_image_views :: proc(using swapchain: ^Swapchain) {
 create_render_pass :: proc(using swapchain: ^Swapchain) {
     samples := device_get_max_usable_sample_count(swapchain.device)
     color_attachment := vk.AttachmentDescription {
-        format = swapchain_image_format,
+        format = swapchain.color_image.format,
         samples = samples,
         loadOp = vk.AttachmentLoadOp.CLEAR,
         storeOp = vk.AttachmentStoreOp.DONT_CARE,
@@ -318,10 +318,10 @@ create_render_pass :: proc(using swapchain: ^Swapchain) {
     dependency := vk.SubpassDependency {
         srcSubpass = vk.SUBPASS_EXTERNAL,
         dstSubpass = 0,
-        srcStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        srcAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
-        dstStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        dstAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+        srcStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
+        srcAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
 
     attachments := []vk.AttachmentDescription{color_attachment, depth_attachment, color_resolve_attachment}
@@ -357,7 +357,7 @@ create_color_resource :: proc(swapchain: ^Swapchain) {
         {.TRANSIENT_ATTACHMENT, .COLOR_ATTACHMENT},
         samples = device_get_max_usable_sample_count(swapchain.device))
 
-    image_view_create(&swapchain.color_image, swapchain.color_format, {.COLOR})
+    image_view_create(&swapchain.color_image, swapchain.color_image.format, {.COLOR})
 }
 
 create_depth_resources :: proc(swapchain: ^Swapchain) {
