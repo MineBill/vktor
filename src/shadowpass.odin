@@ -81,7 +81,7 @@ shadow_pass_init :: proc(s: ^Shadow_Pass, device: ^Device, swapchain: ^Swapchain
         SHADOW_MAP_WIDTH,
         SHADOW_MAP_HEIGHT,
         1,
-        .R8G8B8A8_UNORM,
+        .R8G8B8A8_SRGB,
         .LINEAR,
         {.COLOR_ATTACHMENT, .SAMPLED},
         samples = {._1},
@@ -251,6 +251,7 @@ shadow_pass :: proc(s: ^Shadow_Pass, cmd: vk.CommandBuffer) {
             {.VERTEX},
             0, size_of(mat4) * 2, raw_data(matrices),
         )
+
         // vk.CmdPushConstants(
         //     cmd,
         //     g_app.layout,
@@ -280,7 +281,7 @@ shadow_pass :: proc(s: ^Shadow_Pass, cmd: vk.CommandBuffer) {
 shadow_pass_create_render_pass :: proc(s: ^Shadow_Pass, format: vk.Format) {
     samples := device_get_max_usable_sample_count(s.device)
     color_attachment := vk.AttachmentDescription {
-        format = .R8G8B8A8_UNORM,
+        format = .R8G8B8A8_SRGB,
         samples = {._1},
         loadOp = vk.AttachmentLoadOp.CLEAR,
         storeOp = vk.AttachmentStoreOp.STORE,
@@ -294,7 +295,7 @@ shadow_pass_create_render_pass :: proc(s: ^Shadow_Pass, format: vk.Format) {
         format = format,
         samples = {._1},
         loadOp = .CLEAR,
-        storeOp = .DONT_CARE,
+        storeOp = .STORE,
         stencilLoadOp = .DONT_CARE,
         stencilStoreOp = .DONT_CARE,
         initialLayout = .UNDEFINED,
