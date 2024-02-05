@@ -59,6 +59,15 @@ tasks:
     generates:
       - loader{{.EXE_EXT}}
 
+  release:
+    deps: [build-shaders]
+    cmds:
+      - |
+        odin build src -build-mode:exe -define:VALIDATION=false \
+        -out:bin/app{{exeExt}} -show-timings -o:speed -use-separate-modules \
+        -collection:packages=packages -define:GLFW_SHARED=false \
+        -define:TRACY_ENABLE={{.USE_TRACY}} -define:RELEASE=true
+      
   run:
     deps: [build-loader, build, build-shaders]
     cmds:

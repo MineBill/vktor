@@ -1422,18 +1422,42 @@ vertex_attribute_descriptions :: proc() -> [4]vk.VertexInputAttributeDescription
     )
 }
 
-// main :: proc() {
-//     context.logger = log.create_console_logger()
-//     win.initialize_windowing()
-//     window := win.create(640, 480, "Vulkan Window")
-//     win.setup_events(&window)
+import ww "../window"
+when #config(RELEASE, false) {
+    main :: proc() {
+        context.logger = log.create_console_logger()
+        ww.initialize_windowing()
+        window := ww.create(640, 480, "Vulkan Window")
+        ww.setup_events(&window)
 
-//     mem := init(&window)
+        imgui.CHECKVERSION()
+        imgui.CreateContext(nil)
+        imgui_ctx := imgui.GetCurrentContext()
 
-//     main_loop: for !win.should_close(window) {
-//         win.update(&window)
+        io := imgui.GetIO()
+        io.ConfigFlags += {.DockingEnable}
+        // io.ConfigFlags += {.ViewportsEnable}
 
-//         quit := update(mem)
-//         if quit do break main_loop
-//     }
-// }
+        style := imgui.GetStyle()
+        imgui.StyleColorsDark(style)
+
+        imgui_glfw.InitForVulkan(window.handle, false)
+
+        mem := init(window.handle, imgui_ctx)
+
+        start_time := time.now()
+        main_loop: for !ww.should_close(window) {
+            ww.update(&window)
+
+            t := time.now()
+            delta := time.duration_seconds(time.diff(start_time, t))
+            start_time = t
+
+            quit := update(mem, delta)
+            if quit do break main_loop
+     
+        }
+
+        destroy(mem)
+    }
+}

@@ -119,7 +119,12 @@ swapchain_acquire_next_image :: proc(swapchain: ^Swapchain) -> (index: u32, err:
         1,
         &swapchain.in_flight_fences[swapchain.current_frame],
         true,
-        max(u64),
+        1000000000,
+    )
+    vk.ResetFences(
+        swapchain.device.device,
+        1,
+        &swapchain.in_flight_fences[swapchain.current_frame],
     )
 
     err = vk.AcquireNextImageKHR(
@@ -137,11 +142,6 @@ swapchain_acquire_next_image :: proc(swapchain: ^Swapchain) -> (index: u32, err:
         log.errorf("Failed to acquire next image: %v", err)
     }
 
-    vk.ResetFences(
-        swapchain.device.device,
-        1,
-        &swapchain.in_flight_fences[swapchain.current_frame],
-    )
     return
 }
 
