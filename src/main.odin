@@ -20,6 +20,7 @@ import imgui "packages:odin-imgui"
 import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
 import vma "packages:odin-vma"
+import tracy "packages:odin-tracy"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -117,6 +118,7 @@ g_app: ^Application
 
 @(export)
 init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
+    tracy.SetThreadName("Game")
     vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
@@ -257,7 +259,7 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     //     4, 5, 6, 6, 7, 4,
     // }
 
-    scene_load_from_file(app, "assets/models/scene2.glb", &app.scene)
+    scene_load_from_file(app, "assets/models/scene.glb", &app.scene)
 
     for &image in app.imgui_views_to_process {
         log.debugf("Processing image %#v", image)
@@ -303,7 +305,9 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
 
 @(export)
 update :: proc(mem: rawptr, delta: f64) -> bool {
-    // tracy.ZoneN("Application Update")
+    defer tracy.FrameMark()
+    tracy.ZoneN("update")
+
     app := cast(^Application)mem
     @(static)
     mouse: vec2
@@ -352,6 +356,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
     // Check if the monitor detected any file changes
     if app.shader_monitor.triggered {
+        tracy.ZoneN("Shader Reload")
         log.info("Reloading shaders")
         app.shader_monitor.triggered = false
 
@@ -408,6 +413,8 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
      
+    {
+    tracy.ZoneN("ImGui Stuff")
     if show_demo {
         imgui.ShowDemoWindow(&show_demo)
     }
@@ -478,9 +485,13 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     //     )
     // }
     // imgui.End()
+    }
 
     // === END OF DRAWING ===
-    imgui.Render()
+    {
+        tracy.ZoneN("ImGui Render")
+        imgui.Render()
+    }
     draw_frame(app)
 
     imgui.EndFrame()
@@ -851,6 +862,7 @@ vk_check :: proc(result: vk.Result, location := #caller_location) {
 }
 
 draw_frame :: proc(app: ^Application) {
+    tracy.ZoneN("draw_frame")
     if app.minimized do return
 
     image_index, err := swapchain_acquire_next_image(&app.swapchain)
@@ -895,7 +907,10 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         log.error("Failed to begin command buffer")
     }
 
-    shadow_pass(&a.shadow_pass, command_buffer)
+    {
+        tracy.ZoneN("Shadow Render Pass")
+        shadow_pass(&a.shadow_pass, command_buffer)
+    }
 
     clear_values := []vk.ClearValue {
         {color = {float32 = {0.01, 0.01, 0.01, 1.0}}},
@@ -911,6 +926,8 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         pClearValues = raw_data(clear_values),
     }
 
+    {
+    tracy.ZoneN("Main Render Pass")
     vk.CmdBeginRenderPass(command_buffer, &render_pass_info, vk.SubpassContents.INLINE)
     extent := a.swapchain.extent
     viewport := vk.Viewport {
@@ -996,13 +1013,13 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 
             vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
         }
-
     }
     
-    imgui_draw_data := imgui.GetDrawData()
-    imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
+    // imgui_draw_data := imgui.GetDrawData()
+    // imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
 
     vk.CmdEndRenderPass(command_buffer)
+    }
 
     vk_check(vk.EndCommandBuffer(command_buffer))
 }

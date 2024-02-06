@@ -3,7 +3,7 @@ version: '3'
 
 vars:
   USE_DEBUG: '{{if eq .DEBUG "1"}}-debug{{else}}{{end}}'
-  USE_TRACY: false
+  USE_TRACY: true
   DLL_EXT: '{{if eq OS "windows"}}dll{{else}}so{{end}}'
   EXE_EXT: '{{exeExt | default ".bin"}}'
 

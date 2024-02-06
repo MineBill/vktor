@@ -2,6 +2,7 @@ package main
 import "core:log"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+import tracy "packages:odin-tracy"
 
 Swapchain :: struct {
     swapchain_image_format:     vk.Format,
@@ -37,7 +38,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 
-    image_count := details.capabilities.minImageCount + 1
+    image_count := details.capabilities.minImageCount + 3
     if details.capabilities.maxImageCount > 0 && image_count > details.capabilities.maxImageCount {
         image_count = details.capabilities.maxImageCount
     }
@@ -114,13 +115,18 @@ destroy_swapchain :: proc(using swapchain: ^Swapchain) {
 }
 
 swapchain_acquire_next_image :: proc(swapchain: ^Swapchain) -> (index: u32, err: vk.Result) {
-    vk.WaitForFences(
-        swapchain.device.device,
-        1,
-        &swapchain.in_flight_fences[swapchain.current_frame],
-        true,
-        1000000000,
-    )
+    tracy.Zone()
+
+    {
+        tracy.ZoneN("WaitForFences")
+        vk.WaitForFences(
+            swapchain.device.device,
+            1,
+            &swapchain.in_flight_fences[swapchain.current_frame],
+            true,
+            max(u64),
+        )
+    }
     vk.ResetFences(
         swapchain.device.device,
         1,
@@ -152,7 +158,7 @@ swapchain_submit_command_buffers :: proc(swapchain: ^Swapchain, buffers: []vk.Co
     signal_semaphores: []vk.Semaphore =  {
         swapchain.render_finished_semaphores[swapchain.current_frame],
     }
-    flags := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT, .ALL_GRAPHICS}
+    flags := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
 
     submit_info := vk.SubmitInfo {
         sType                = vk.StructureType.SUBMIT_INFO,
@@ -215,7 +221,7 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.FIFO {
+        if mode == vk.PresentModeKHR.IMMEDIATE {
             return mode
         }
     }
