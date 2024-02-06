@@ -472,8 +472,8 @@ image_view_create_raw :: proc(
 image_sampler_create :: proc(device: ^Device, mip_levels: u32 = 0, bias: f32 = 0) -> (sampler: vk.Sampler) {
     sampler_info := vk.SamplerCreateInfo {
         sType = .SAMPLER_CREATE_INFO,
-        magFilter = .LINEAR,
-        minFilter = .LINEAR,
+        magFilter = .NEAREST,
+        minFilter = .NEAREST,
         addressModeU = .REPEAT,
         addressModeV = .REPEAT,
         addressModeW = .REPEAT,

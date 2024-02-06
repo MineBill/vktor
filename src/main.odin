@@ -85,7 +85,7 @@ Application :: struct {
     uniform_buffers:            []Buffer,
     uniform_mapped_buffers:     []rawptr,
     camera:                     Camera,
-    image:                      Image,
+    // image:                      Image,
     minimized:                  bool,
     resized:                    bool,
     scene:                      Scene,
@@ -240,11 +240,6 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     }
     imgui_vulkan.Init(&imgui_init, app.swapchain.renderpass)
 
-    for &image in app.imgui_views_to_process {
-        log.debugf("Processing image %#v", image)
-        image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
-    }
-    clear(&app.imgui_views_to_process)
 
     // app.vertices = []Vertex {
     //     {{-0.5, -0.5,  0.0}, {1.0, 0.0, 1.0}, {1.0, 0.0}},
@@ -262,19 +257,24 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     //     4, 5, 6, 6, 7, 4,
     // }
 
-    app.scene = scene_load_from_file(app, "assets/models/scene.glb")
+    scene_load_from_file(app, "assets/models/scene2.glb", &app.scene)
 
+    for &image in app.imgui_views_to_process {
+        log.debugf("Processing image %#v", image)
+        image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
+    }
+    clear(&app.imgui_views_to_process)
     app.scene_data.main_light.color = vec4{1, 1, 1, 1}
     app.scene_data.main_light.direction = vec4{-1, -1, -1, 1}
     app.near_far = [2]f32{1.0, 40.0}
 
-    app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
-    image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
-    app.imgui_image = imgui_vulkan.AddTexture(
-        app.image.sampler,
-        app.image.view,
-        .SHADER_READ_ONLY_OPTIMAL)
-    append(&g_app.imgui_views_to_process, &app.image)
+    // app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
+    // image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
+    // app.imgui_image = imgui_vulkan.AddTexture(
+    //     app.image.sampler,
+    //     app.image.view,
+    //     .SHADER_READ_ONLY_OPTIMAL)
+    // append(&g_app.imgui_views_to_process, &app.image)
 
     shadow_pass_init(&app.shadow_pass, &app.device, &app.swapchain)
     app.shadow_pass.color_image.extra.ds = imgui_vulkan.AddTexture(
@@ -389,6 +389,14 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     // light.position.y = math.sin(t * 1) * 1
     // light.color = vec4{1, 1, 1, 0}
 
+    if is_key_just_pressed(.j) {
+        s: cstring
+        vma.BuildStatsString(g_app.allocator, &s, false)
+        defer vma.FreeStatsString(g_app.allocator, s)
+
+        log.debugf("%v", s)
+    }
+
     @static show_demo := false
 
     if imgui.BeginMainMenuBar() {
@@ -438,6 +446,8 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
                     if imgui.TreeNode("Material") {
                         imgui.DragFloatEx("Roughness", &m.material.roughness_factor, 0.01, 0.0, 1.0, "%f", {})
                         imgui.ColorEdit4("Albedo", &m.material.albedo_color, {})
+                        imgui.TextUnformatted(fmt.ctprintf("Albedo device ptr: %v", m.material.albedo_image.device))
+                        imgui.TextUnformatted(fmt.ctprintf("Albedo imgui ds: %v", m.material.albedo_image.extra.ds))
                         imgui.TextUnformatted("Albedo Image")
                         imgui.Image(transmute(imgui.TextureID)m.material.albedo_image.extra.ds, vec2{100, 100})
                         imgui.TextUnformatted("Normal Map")
@@ -480,7 +490,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     event_context_clear(&app.event_context)
 
     for &image in app.imgui_views_to_process {
-        // log.debugf("[FRAME]: Processing image %#v", image)
+        log.debugf("[FRAME]: Processing image %#v", image)
         // if image.width != 1024 do continue
         image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
     }
@@ -530,7 +540,7 @@ destroy :: proc(mem: rawptr) {
     delete(app.uniform_buffers)
     delete(app.uniform_mapped_buffers)
 
-    image_destroy(&app.image)
+    // image_destroy(&app.image)
 
     cubemap_deinit(&app.cubemap_pipeline)
     shadow_pass_deinit(&app.shadow_pass)
@@ -998,12 +1008,12 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
 }
 
 Scene :: struct {
-    models: [dynamic]Model,
+    models: [dynamic]^Model,
 }
 
-scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) {
+scene_load_from_file :: proc(app: ^Application, file: string, scene: ^Scene) {
     model_data, ok := os.read_entire_file_from_filename(file)
-    if !ok do return {}
+    if !ok do return
 
     options := gltf.options{}
     data, res := gltf.parse(options, raw_data(model_data), len(model_data))
@@ -1024,8 +1034,8 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
         // if node.name != "Cube.002" do continue
         mesh := node.mesh
         // model := Model {}
-        append(&scene.models, Model{})
-        model := &scene.models[len(scene.models) - 1]
+        append(&scene.models, new(Model))
+        model := scene.models[len(scene.models) - 1]
         model.name = strings.clone_from(node.name)
 
         init_material(&app.device, &model.material, app.material_layout)
@@ -1089,8 +1099,8 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
             model.index_buffer = create_index_buffer(&app.device, indices)
             model.num_indices = u32(len(indices))
 
-            albedo_data: []byte
-            normal_map_data: []byte
+            albedo_data: []byte = nil
+            normal_map_data: []byte = nil
 
             material:^gltf.material = primitive.material
             if material != nil {
@@ -1137,7 +1147,7 @@ scene_load_from_file :: proc(app: ^Application, file: string) -> (scene: Scene) 
 
 scene_destroy :: proc(scene: ^Scene) {
     for &model in scene.models {
-        destroy_model(&model)
+        destroy_model(model)
     }
 }
 

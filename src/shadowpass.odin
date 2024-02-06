@@ -224,7 +224,7 @@ shadow_pass :: proc(s: ^Shadow_Pass, cmd: vk.CommandBuffer) {
         )
         // light_proj := linalg.matrix4_perspective(linalg.to_radians(f32(45.0)), 1, g_app.near_far[0], g_app.near_far[1])
 
-        pos := g_app.scene_data.view_position.rgb + vec3{20, 20, 00}
+        pos := vec3{0, 0, 0} + g_app.scene_data.main_light.direction.xyz * -20
         light_view := linalg.matrix4_look_at_f32(
             pos,
             pos + g_app.scene_data.main_light.direction.xyz,

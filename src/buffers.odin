@@ -3,6 +3,7 @@ package main
 import vk "vendor:vulkan"
 import "core:mem"
 import vma "packages:odin-vma"
+import "core:log"
 
 Buffer :: struct {
     device: ^Device,
@@ -158,6 +159,7 @@ buffer_create :: proc(
         flags = {.HOST_ACCESS_SEQUENTIAL_WRITE},
     }
     vk_check(vma.CreateBuffer(g_app.allocator, &buffer_info, &ainfo, &buffer.handle, &buffer.allocation, nil))
+    vma.SetAllocationName(g_app.allocator, buffer.allocation, "Buffer")
 
     // memory_requirements: vk.MemoryRequirements
     // vk.GetBufferMemoryRequirements(buffer.device.device, buffer.handle, &memory_requirements)
@@ -178,5 +180,10 @@ buffer_create :: proc(
 }
 
 buffer_destroy :: proc(buffer: ^Buffer) {
+    info: vma.AllocationInfo
+    vma.GetAllocationInfo(g_app.allocator, buffer.allocation, &info)
+    if info.pMappedData != nil {
+        buffer_unmap(buffer)
+    }
     vma.DestroyBuffer(g_app.allocator, buffer.handle, buffer.allocation)
 }
