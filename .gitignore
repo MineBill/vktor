@@ -7,3 +7,6 @@ bin/
 **/*.dll
 **/*.bin
 **/*.raddbgprofile
+**/*.lib
+**/*.so
+**/*.a

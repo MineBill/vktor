@@ -19,7 +19,7 @@ tasks:
         odin build src -build-mode:shared -define:VALIDATION=true \
         -out:bin/app.{{.DLL_EXT}} -show-timings -o:none -use-separate-modules \
         -collection:packages=packages -define:GLFW_SHARED=true \
-        -define:TRACY_ENABLE={{.USE_TRACY}} {{.USE_DEBUG}}
+        -define:TRACY_ENABLE={{.USE_TRACY}} {{.USE_DEBUG}} -define:NK_INCLUDE_FONT_BAKING=true
     sources:
       - src/**/*.odin
       - window/**/*.odin
@@ -41,6 +41,10 @@ tasks:
       - glslc -fshader-stage=frag assets/shaders/Builtin.ShadowPass.frag.glsl -o bin/assets/shaders/Builtin.ShadowPass.frag.spv
       - glslc -fshader-stage=vert assets/shaders/Builtin.ShadowPass.vert.glsl -o bin/assets/shaders/Builtin.ShadowPass.vert.spv 
       - spirv-link bin/assets/shaders/Builtin.ShadowPass.frag.spv bin/assets/shaders/Builtin.ShadowPass.vert.spv -o bin/assets/shaders/Builtin.ShadowPass.spv
+
+      - glslc -fshader-stage=frag assets/shaders/nuklear.frag.glsl -o bin/assets/shaders/nuklear.frag.spv
+      - glslc -fshader-stage=vert assets/shaders/nuklear.vert.glsl -o bin/assets/shaders/nuklear.vert.spv 
+      - spirv-link bin/assets/shaders/nuklear.frag.spv bin/assets/shaders/nuklear.vert.spv -o bin/assets/shaders/nuklear.spv
     sources:
       - assets/shaders/**/*.glsl
     generates:
@@ -63,8 +67,8 @@ tasks:
     deps: [build-shaders]
     cmds:
       - |
-        odin build src -build-mode:exe -define:VALIDATION=false \
-        -out:bin/app{{exeExt}} -show-timings -o:speed -use-separate-modules \
+        odin build src -build-mode:exe -define:VALIDATION=true \
+        -out:bin/app{{exeExt}} -show-timings -o:none -use-separate-modules \
         -collection:packages=packages -define:GLFW_SHARED=false \
         -define:TRACY_ENABLE={{.USE_TRACY}} -define:RELEASE=true
       

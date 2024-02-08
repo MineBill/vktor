@@ -79,6 +79,7 @@ image_load_from_file :: proc(device: ^Device, file_name: string, flags := vk.Ima
     return
 }
 
+// Expects a png/jpg image.
 image_load_from_memory :: proc(device: ^Device, data: []byte, flags := vk.ImageCreateFlags{}) -> (image: Image) {
     x, y, channels: i32
     image_data := stb.load_from_memory(raw_data(data), i32(len(data)), &x, &y, &channels, 4)
@@ -101,6 +102,40 @@ image_load_from_memory :: proc(device: ^Device, data: []byte, flags := vk.ImageC
     image = image_create(
         device, 
         u32(x), u32(y),
+        mip_levels,
+        .R8G8B8A8_SRGB,
+        .OPTIMAL,
+        {.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
+        flags)
+    image.layer_count = 1
+
+    image_transition_layout(&image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    buffer_copy_to_image(&staging, &image)
+    // transition_image_layout(&image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+
+    image_generate_mipmaps(&image)
+    return
+}
+
+// Expects an rgba image.
+image_load_from_memory_raw :: proc(device: ^Device, data: []byte, w, h: i32, flags := vk.ImageCreateFlags{}) -> (image: Image) {
+    size := len(data)
+
+    mip_levels := cast(u32)math.floor(math.log2(cast(f32)max(w, h))) + 1
+    // log.debugf("Will generated %v mip levels for '%v'", mip_levels, file_name)
+
+    staging := buffer_create(
+        device,
+        u32(size),
+        {.TRANSFER_SRC},
+        {.HOST_VISIBLE, .HOST_COHERENT})
+    defer buffer_destroy(&staging)
+
+    buffer_copy_data(&staging, data)
+
+    image = image_create(
+        device, 
+        u32(w), u32(h),
         mip_levels,
         .R8G8B8A8_SRGB,
         .OPTIMAL,

@@ -1,6 +1,6 @@
 package main
 import "core:log"
-import "vendor:glfw"
+import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 import tracy "packages:odin-tracy"
 
@@ -38,7 +38,7 @@ init_swapchain :: proc(device: ^Device, swapchain: ^Swapchain) {
     swapchain.swapchain_image_format = surface_format.format
     swapchain.extent = choose_swap_extent(device, details.capabilities)
 
-    image_count := details.capabilities.minImageCount + 3
+    image_count := details.capabilities.minImageCount + 1
     if details.capabilities.maxImageCount > 0 && image_count > details.capabilities.maxImageCount {
         image_count = details.capabilities.maxImageCount
     }
@@ -221,9 +221,10 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.IMMEDIATE {
+        if mode == vk.PresentModeKHR.FIFO {
             return mode
         }
+
     }
     return vk.PresentModeKHR.FIFO
 }
@@ -238,7 +239,10 @@ choose_swap_extent :: proc(
         log.debug("Choosing swap extent: ", capabilities.currentExtent)
         return capabilities.currentExtent
     } else {
-        width, height := glfw.GetFramebufferSize(device.window)
+        width: i32
+        height: i32
+        sdl.GetWindowSize(device.window, &width, &height)
+        // width, height := glfw.GetFramebufferSize(device.window)
         extent.width = clamp(
             cast(u32)width,
             capabilities.minImageExtent.width,

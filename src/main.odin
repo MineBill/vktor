@@ -10,17 +10,18 @@ import "core:runtime"
 import "core:strings"
 import "core:time"
 import gltf "vendor:cgltf"
-import "vendor:glfw"
+import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 import "core:thread"
 import "core:image/png"
 import stbi "vendor:stb/image"
 import "../monitor"
 import imgui "packages:odin-imgui"
-import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
+import imgui_sdl "packages:odin-imgui/imgui_impl_sdl2"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
 import vma "packages:odin-vma"
 import tracy "packages:odin-tracy"
+import nk "packages:odin-nuklear"
 
 VALIDATION :: #config(VALIDATION, false)
 
@@ -72,7 +73,7 @@ Camera :: struct {
 }
 
 Application :: struct {
-    window:                     glfw.WindowHandle,
+    window:                     ^sdl.Window,
     start_time:                 time.Time,
     device:                     Device,
     swapchain:                  Swapchain,
@@ -87,6 +88,7 @@ Application :: struct {
     uniform_mapped_buffers:     []rawptr,
     camera:                     Camera,
     // image:                      Image,
+    quit:                       bool,
     minimized:                  bool,
     resized:                    bool,
     scene:                      Scene,
@@ -111,15 +113,21 @@ Application :: struct {
 
     near_far: [2]f32,
 
+    nuke:                       Nuklear,
+
     allocator: vma.Allocator,
 }
 
 g_app: ^Application
 
 @(export)
-init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
+init :: proc(window: ^sdl.Window, imgui_ctx: ^imgui.Context) -> rawptr {
     tracy.SetThreadName("Game")
-    vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
+    sdl.Vulkan_LoadLibrary(nil)
+    // sdl.Vulkan
+
+    // sdl.Vulkan_GetVkGetInstanceProcAddr
+    vk.load_proc_addresses(sdl.Vulkan_GetVkGetInstanceProcAddr())
     if vk.CreateInstance == nil {
         a := typeid_of(type_of(vk.CreateInstance))
         log.errorf("Vulkan proc is nil after loading proc addresses. Something is up: %v", a)
@@ -143,7 +151,7 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     }
     app.event_context.odin_context = context
 
-    setup_events(window, &app.event_context)
+    // setup_events(window, &app.event_context)
 
     app.device = create_device(window, app.dbg_context)
 
@@ -192,10 +200,10 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     // ImGui Initialization
     imgui.SetCurrentContext(imgui_ctx)
     
-    imgui_glfw.InstallCallbacks(window)
+    // imgui_glfw.InstallCallbacks(window)
     b := imgui_vulkan.LoadFunctions(proc "c" (name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
         // NOTE(minebill): Odin recommends not to use auto_cast but eh.
-        return auto_cast glfw.GetInstanceProcAddress(auto_cast user_data, name)
+        return vk.GetInstanceProcAddr(auto_cast user_data, name)
     }, app.device.instance)
 
     // NOTE(minebill): Lol, vulkan is amazing!
@@ -242,6 +250,14 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     }
     imgui_vulkan.Init(&imgui_init, app.swapchain.renderpass)
 
+    nuklear_init(&app.nuke, &app.device, window, &app.swapchain)
+
+    atlas: ^nk.Font_Atlas
+    nk_font_stash_begin(&app.nuke, &atlas)
+    // Add fonts here
+    nk_font_stash_end(&app.nuke)
+
+    nk.style_default(&app.nuke.ctx)
 
     // app.vertices = []Vertex {
     //     {{-0.5, -0.5,  0.0}, {1.0, 0.0, 1.0}, {1.0, 0.0}},
@@ -262,7 +278,6 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
     scene_load_from_file(app, "assets/models/scene.glb", &app.scene)
 
     for &image in app.imgui_views_to_process {
-        log.debugf("Processing image %#v", image)
         image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
     }
     clear(&app.imgui_views_to_process)
@@ -272,7 +287,7 @@ init :: proc(window: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr {
 
     // app.image = image_load_from_file(&app.device, "assets/textures/viking_room.png")
     // image_view_create(&app.image, .R8G8B8A8_SRGB, {.COLOR})
-    // app.imgui_image = imgui_vulkan.AddTexture(
+    // app.imgui_image = imguiNK_INCLUDE_DEFAULT_FONT_vulkan.AddTexture(
     //     app.image.sampler,
     //     app.image.view,
     //     .SHADER_READ_ONLY_OPTIMAL)
@@ -309,6 +324,7 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     tracy.ZoneN("update")
 
     app := cast(^Application)mem
+    if app.quit do return true
     @(static)
     mouse: vec2
     event_loop: for event in app.event_context.events {
@@ -322,9 +338,9 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
                 app.mouse_locked = !app.mouse_locked
                 log.infof("Mouse is now %v", "locked" if app.mouse_locked else "unlocked")
                 if app.mouse_locked {
-                    glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+                    // glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
                 } else {
-                    glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+                    // glfw.SetInputMode(app.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
                 }
             }
 
@@ -354,6 +370,18 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
+    nk.input_begin(&app.nuke.ctx)
+    event: sdl.Event
+    for sdl.PollEvent(&event) {
+        imgui_sdl.ProcessEvent(&event)
+        nk_handle_event(&app.nuke, event)
+
+        if event.type == .QUIT || (event.type == .KEYUP && event.key.keysym.sym == .ESCAPE) {
+            return true
+        }
+    }
+    nk.input_end(&app.nuke.ctx)
+
     // Check if the monitor detected any file changes
     if app.shader_monitor.triggered {
         tracy.ZoneN("Shader Reload")
@@ -373,9 +401,16 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
         }
     }
 
+    c := &app.nuke.ctx
+    // nk.clear(c)
+    if nk.begin(c, "pepe", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title}) {
+        nk.text_string(c, "pepe", {.Top})
+    }
+    nk.end(c)
+
     // === START OF DRAWING ===
     imgui_vulkan.NewFrame()
-    imgui_glfw.NewFrame()
+    imgui_sdl.NewFrame()
     imgui.NewFrame()
 
     @(static)
@@ -501,8 +536,6 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     event_context_clear(&app.event_context)
 
     for &image in app.imgui_views_to_process {
-        log.debugf("[FRAME]: Processing image %#v", image)
-        // if image.width != 1024 do continue
         image.extra.ds = imgui_vulkan.AddTexture(image.sampler, image.view, .SHADER_READ_ONLY_OPTIMAL)
     }
     clear(&app.imgui_views_to_process)
@@ -513,14 +546,24 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 }
 
 @(export)
+event :: proc(mem: rawptr, event: sdl.Event) -> bool {
+    app := cast(^Application)mem
+    if event.type == .QUIT {
+        app.quit = true
+        return true
+    }
+    return false
+}
+
+@(export)
 reloaded :: proc(mem: rawptr, imgui_ctx: ^imgui.Context) {
     app := cast(^Application)mem
     log.infof("Reloaded")
     g_app = app
-    vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
+    // vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
     vk.load_proc_addresses_instance(app.device.instance)
 
-    setup_events(app.window, &app.event_context)
+    // setup_events(app.window, &app.event_context)
     // Restart background shader monitoring thread
 
     monitor.init(&app.shader_monitor, "bin/assets/shaders", {
@@ -529,8 +572,8 @@ reloaded :: proc(mem: rawptr, imgui_ctx: ^imgui.Context) {
     })
     thread.run_with_data(&app.shader_monitor, monitor.thread_proc)
     imgui.SetCurrentContext(imgui_ctx)
-    imgui_glfw.RestoreCallbacks(app.window)
-    imgui_glfw.InstallCallbacks(app.window)
+    // imgui_glfw.RestoreCallbacks(app.window)
+    // imgui_glfw.InstallCallbacks(app.window)
 }
 
 @(export)
@@ -946,6 +989,7 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     }
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
+    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.handle)
     {
 
@@ -968,6 +1012,7 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         vk.CmdDraw(command_buffer, a.cubemap_pipeline.vertex_count, 1, 0, 0)
 
     }
+    */
 
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
     {
@@ -1017,6 +1062,8 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     
     // imgui_draw_data := imgui.GetDrawData()
     // imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
+
+    nuklear_draw(&a.nuke, command_buffer)
 
     vk.CmdEndRenderPass(command_buffer)
     }

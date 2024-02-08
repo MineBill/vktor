@@ -2,7 +2,7 @@ package main
 import "core:log"
 import "core:runtime"
 import "core:strings"
-import "vendor:glfw"
+import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 import vma "packages:odin-vma"
 
@@ -13,7 +13,7 @@ Device :: struct {
     instance:        vk.Instance,
     debug_messenger: vk.DebugUtilsMessengerEXT,
     physical_device: vk.PhysicalDevice,
-    window:          glfw.WindowHandle,
+    window:          ^sdl.Window,
     command_pool:    vk.CommandPool,
     device:          vk.Device,
     surface:         vk.SurfaceKHR,
@@ -24,13 +24,13 @@ Device :: struct {
     msaa_samples:    vk.SampleCountFlags,
 }
 
-create_device :: proc(window: glfw.WindowHandle, dbg: ^Debug_Context) -> (device: Device) {
+create_device :: proc(window: ^sdl.Window, dbg: ^Debug_Context) -> (device: Device) {
     device.window = window
-    device.instance = create_vulkan_instance(dbg)
+    device.instance = create_vulkan_instance(dbg, window)
     device.debug_messenger = setup_debug_callback(device.instance, dbg)
 
-    result := glfw.CreateWindowSurface(device.instance, window, nil, &device.surface)
-    if result != vk.Result.SUCCESS {
+    result := sdl.Vulkan_CreateSurface(window, device.instance, &device.surface)
+    if !result {
         log.error("Failed to create window surface", result)
     }
 
@@ -116,7 +116,7 @@ device_allocate_descriptor_sets :: proc(
     return
 }
 
-create_vulkan_instance :: proc(dbg: ^Debug_Context) -> (instance: vk.Instance) {
+create_vulkan_instance :: proc(dbg: ^Debug_Context, window: ^sdl.Window) -> (instance: vk.Instance) {
     when VALIDATION {
         if !check_validation_layers() {
             panic("Validation layer check failed. Cannot continue")
@@ -132,8 +132,7 @@ create_vulkan_instance :: proc(dbg: ^Debug_Context) -> (instance: vk.Instance) {
         apiVersion         = vk.API_VERSION_1_3,
     }
 
-    extensions := get_required_extensions()
-    defer delete(extensions)
+    extensions := get_required_extensions(window)
 
     instance_info := vk.InstanceCreateInfo {
         sType                   = vk.StructureType.INSTANCE_CREATE_INFO,
@@ -493,14 +492,19 @@ create_logical_device :: proc(device: ^Device) {
 // Region: Helper procedures
 
 // @Allocates
-get_required_extensions :: proc() -> []cstring {
-    extensions := make([dynamic]cstring)
-    glfw_extensions := glfw.GetRequiredInstanceExtensions()
-    for ext in glfw_extensions {
-        append(&extensions, ext)
+get_required_extensions :: proc(window: ^sdl.Window) -> []cstring {
+    count: u32
+    sdl.Vulkan_GetInstanceExtensions(window, &count, nil)
+
+    extensions := make([dynamic]cstring, count, context.temp_allocator)
+
+    sdl.Vulkan_GetInstanceExtensions(window, &count, raw_data(extensions))
+    // glfw_extensions := glfw.GetRequiredInstanceExtensions()
+    append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
+    for ext in extensions {
+        log.infof("Using extension: %v", ext)
     }
 
-    append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
 
     return extensions[:]
 }

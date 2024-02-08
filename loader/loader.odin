@@ -5,7 +5,6 @@ package loader
 // Then, during development, it monitors the shared library (which is the Application)
 // and reloads it if neccessary.
 
-import win "../window"
 import "core:c/libc"
 import "core:dynlib"
 import "core:fmt"
@@ -18,19 +17,20 @@ import "core:strings"
 import "core:sync"
 import "core:sys/windows"
 import "core:thread"
-import "vendor:glfw"
 import "core:time"
 import "../monitor"
 import imgui "packages:odin-imgui"
-import imgui_glfw "packages:odin-imgui/imgui_impl_glfw"
+import imgui_sdl2 "packages:odin-imgui/imgui_impl_sdl2"
 import imgui_vulkan "packages:odin-imgui/imgui_impl_vulkan"
+import sdl "vendor:sdl2"
 
 Symbol_Table :: struct {
-    init:     #type proc(win: glfw.WindowHandle, imgui_ctx: ^imgui.Context) -> rawptr,
+    init:     #type proc(window: ^sdl.Window, imgui_ctx: ^imgui.Context) -> rawptr,
     update:   #type proc(memory: rawptr, delta: f64) -> bool,
     destroy:  #type proc(memory: rawptr),
     get_size: #type proc() -> int,
     reloaded: #type proc(memory: rawptr, imgui_ctx: ^imgui.Context),
+    event:    #type proc(memory: rawptr, event: sdl.Event) -> bool,
     __handle: dynlib.Library,
 }
 
@@ -77,8 +77,19 @@ main :: proc() {
     })
     thread.create_and_start_with_data(&library_monitor, monitor.thread_proc)
 
-    win.initialize_windowing()
-    window := win.create(640 * 2, 480 * 1.5, "Vulkan Window")
+    // win.initialize_windowing()
+    // window := win.create(640 * 2, 480 * 1.5, "Vulkan Window")
+    if sdl.Init({.TIMER, .AUDIO, .VIDEO, .EVENTS}) != 0 {
+        log.errorf("Failed to initialize SDL2: %v", sdl.GetError())
+        return
+    }
+
+    // sdl.Vulkan_LoadLibrary(nil)
+    window := sdl.CreateWindow("Vulkan Window", 100, 100, 1280, 720, {.SHOWN, .VULKAN, .RESIZABLE})
+    if window == nil {
+        log.errorf("Failed to create SDL2 window: %v", sdl.GetError())
+        return
+    }
 
     // ImGui Initialization
     imgui.CHECKVERSION()
@@ -92,15 +103,18 @@ main :: proc() {
     style := imgui.GetStyle()
     imgui.StyleColorsDark(style)
 
-    imgui_glfw.InitForVulkan(window.handle, false)
+    imgui_sdl2.InitForVulkan(window)
 
-    mem := symbols.init(window.handle, imgui_ctx)
+    mem := symbols.init(window, imgui_ctx)
 
+    Game_Thread :: struct {
+        symbols: ^Symbol_Table,
+        memory: ^rawptr,
+    }
+
+    running := true
     start_time := time.now()
-    main_loop: for !win.should_close(window) {
-        // defer tracy.FrameMark()
-        win.update(&window)
-
+    main_loop: for running {
         if library_monitor.triggered {
             library_monitor.triggered = false
 
@@ -123,15 +137,8 @@ main :: proc() {
         t := time.now()
         delta := time.duration_seconds(time.diff(start_time, t))
         start_time = t
-
         quit := symbols.update(mem, delta)
-        if quit do break main_loop
-
-        // TARGET :: 1.0 / 144.0
-        // if delta < TARGET {
-        //     sleep := time.Duration((TARGET - delta) * f64(time.Second))
-        //     time.sleep(sleep)
-        // }
+        if quit do break
     }
 
     symbols.destroy(mem)
