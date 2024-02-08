@@ -312,6 +312,7 @@ init :: proc(window: ^sdl.Window, imgui_ctx: ^imgui.Context) -> rawptr {
         "Builtin.Object.spv",
         "Builtin.Cubemap.spv",
         "Builtin.ShadowPass.spv",
+        "nuklear.spv",
     })
     thread.run_with_data(&app.shader_monitor, monitor.thread_proc)
 
@@ -398,13 +399,19 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
             )
         } else if strings.contains(path, "Cubemap") {
             create_cubemap_pipeline(&app.cubemap_pipeline)
+        } else if strings.contains(path, "nuklear") {
+            nuklear_create_pipeline(&app.nuke)
         }
     }
 
     c := &app.nuke.ctx
     // nk.clear(c)
-    if nk.begin(c, "pepe", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title}) {
-        nk.text_string(c, "pepe", {.Top})
+    if nk.begin(c, "Pepegas", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title}) {
+        nk.layout_row_static(c, 30, 80, 1);
+        if nk.button_text(c, "Test", 4) {
+            log.debugf("Pepegas")
+        }
+        nk.text_string(c, "Pepegas", {.Top})
     }
     nk.end(c)
 
@@ -418,10 +425,11 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     current_time := time.now()
     t := f32(time.duration_seconds(time.diff(app.start_time, current_time)))
 
-    input := get_vector(.d, .a, .w, .s) * 1
-    up_down := get_axis(.space, .left_control)
-    app.camera.position.xz += ( vec4{input.x, 0, -input.y, 0} * linalg.matrix4_from_quaternion(app.camera.rotation)).xz * f32(delta)
-    app.camera.position.y += up_down * f32(delta)
+    // input := get_vector(.d, .a, .w, .s) * 1
+    // up_down := get_axis(.space, .left_control)
+    // app.camera.position.xz += ( vec4{input.x, 0, -input.y, 0} * linalg.matrix4_from_quaternion(app.camera.rotation)).xz * f32(delta)
+    // app.camera.position.y += up_down * f32(delta)
+    app.camera.position.y = math.sin(t) * 0.5 + 1.0
 
     app.scene_data.view_position.xyz = app.camera.position
     // light := &app.scene_data.main_light
@@ -898,7 +906,6 @@ create_pipeline :: proc(
     return
 }
 
-
 vk_check :: proc(result: vk.Result, location := #caller_location) {
     if result == vk.Result.SUCCESS do return
     log.errorf("Vulkan call failed: %v %v", result, location, location = location)
@@ -989,10 +996,8 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
     }
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
-    /*
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.cubemap_pipeline.handle)
     {
-
         buffers: []vk.Buffer = {a.cubemap_pipeline.buffer.handle}
         offsets: []vk.DeviceSize = {0}
         vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(buffers), raw_data(offsets))
@@ -1012,7 +1017,6 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
         vk.CmdDraw(command_buffer, a.cubemap_pipeline.vertex_count, 1, 0, 0)
 
     }
-    */
 
     vk.CmdBindPipeline(command_buffer, vk.PipelineBindPoint.GRAPHICS, a.simple_pipeline.handle)
     {
@@ -1059,11 +1063,11 @@ record_command_buffer :: proc(a: ^Application, image_index: u32) {
             vk.CmdDrawIndexed(command_buffer, model.num_indices, 1, 0, 0, 0)
         }
     }
-    
-    // imgui_draw_data := imgui.GetDrawData()
-    // imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
 
     nuklear_draw(&a.nuke, command_buffer)
+
+    imgui_draw_data := imgui.GetDrawData()
+    imgui_vulkan.RenderDrawData(imgui_draw_data, command_buffer)
 
     vk.CmdEndRenderPass(command_buffer)
     }

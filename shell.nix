@@ -43,6 +43,7 @@ pkgs.mkShell rec {
             ripgrep
             glfw-wayland
             just
+            SDL2
 
             shaderc
             vulkan-tools

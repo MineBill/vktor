@@ -221,7 +221,7 @@ choose_swap_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Surface
 
 choose_swap_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
-        if mode == vk.PresentModeKHR.FIFO {
+        if mode == vk.PresentModeKHR.MAILBOX {
             return mode
         }
 

@@ -50,6 +50,7 @@ tasks:
     generates:
       - bin/assets/shaders/Builtin.Object.spv
       - bin/assets/shaders/Builtin.Cubemap.spv
+      - bin/assets/shaders/nuklear.spv
 
   build-loader:
     cmds:

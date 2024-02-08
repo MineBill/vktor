@@ -17,7 +17,6 @@ layout(location = 1) out vec2 fragUv;
 
 void main() {
     gl_Position = ubo.projection * vec4(position, 0.0, 1.0);
-    gl_Position.y = -gl_Position.y;
     fragColor = vec4(color[0]/255.0, color[1]/255.0, color[2]/255.0, color[3]/255.0);
     fragUv = uv;
 }

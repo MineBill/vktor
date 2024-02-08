@@ -7,6 +7,7 @@ import "core:mem"
 import tracy "packages:odin-tracy"
 import "core:math/linalg"
 import vma "packages:odin-vma"
+import "core:log"
 
 MAX_VERTEX_BUFFER :: 512 * 1024
 MAX_INDEX_BUFFER :: 128 * 1024
@@ -22,6 +23,10 @@ Nuklear :: struct {
     font_image: Image,
 
     cmds: nk.Buffer,
+
+    render_pass: vk.RenderPass,
+    framebuffer: vk.Framebuffer,
+    framebuffer_image: Image,
 
     sampler: vk.Sampler,
     null_texutre: nk.Draw_Null_Texture,
@@ -89,6 +94,24 @@ nuklear_init :: proc(n: ^Nuklear, device: ^Device, window: ^sdl.Window, swapchai
 
     nuklear_allocate_texture_descriptor_sets(n)
 
+
+    nuklear_create_render_pass(n)
+
+    n.framebuffer_image = image_create(
+        device,
+        SHADOW_MAP_WIDTH,
+        SHADOW_MAP_HEIGHT,
+        1,
+        n.pipeline.swapchain.color_format,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        samples = {._1},
+    )
+    n.framebuffer_image.sampler = image_sampler_create(device)
+    image_view_create(&n.framebuffer_image, n.pipeline.swapchain.color_format, {.COLOR})
+
+    nuklear_create_framebuffer(n)
+
     layouts := []vk.DescriptorSetLayout {
         n.pipeline.descriptor_layout,
         n.pipeline.texture_set_layout,
@@ -103,7 +126,7 @@ nuklear_init :: proc(n: ^Nuklear, device: ^Device, window: ^sdl.Window, swapchai
 
     vk_check(vk.CreatePipelineLayout(device.device, &pipeline_layout_create_info, nil, &n.pipeline.pipeline_layout))
 
-    nuklear_cubemap_pipeline(&n.pipeline)
+    nuklear_create_pipeline(n)
 
     n.pipeline.uniform_buffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
     n.pipeline.uniform_mapped_buffers = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
@@ -172,23 +195,67 @@ nuklear_init :: proc(n: ^Nuklear, device: ^Device, window: ^sdl.Window, swapchai
     }
 }
 
+nuklear_render_pass :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
+    clear_values := []vk.ClearValue {
+        {color = {float32 = {1.0, 0.0, 0.0, 1.0}}},
+        {depthStencil = {1, 0}},
+    }
+
+    render_pass_info := vk.RenderPassBeginInfo {
+        sType = vk.StructureType.RENDER_PASS_BEGIN_INFO,
+        renderPass = n.render_pass,
+        framebuffer = n.framebuffer,
+        renderArea = vk.Rect2D{
+            offset = {0, 0},
+            extent = n.pipeline.swapchain.extent,
+        },
+        clearValueCount = u32(len(clear_values)),
+        pClearValues = raw_data(clear_values),
+    }
+
+    vk.CmdBeginRenderPass(cmd, &render_pass_info, vk.SubpassContents.INLINE)
+    // image_transition_layout(&s.color_image, .SHADER_READ_ONLY_OPTIMAL, .COLOR_ATTACHMENT_OPTIMAL)
+    defer {
+        vk.CmdEndRenderPass(cmd)
+        // image_transition_layout(&s.color_image, .COLOR_ATTACHMENT_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+    }
+
+    viewport := vk.Viewport {
+        x        = 0,
+        y        = 0,
+        width    = cast(f32)n.pipeline.swapchain.extent.width,
+        height   = cast(f32)n.pipeline.swapchain.extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+    vk.CmdSetViewport(cmd, 0, 1, &viewport)
+    scissor := vk.Rect2D {
+        offset = {0, 0},
+        extent = n.pipeline.swapchain.extent,
+    }
+    vk.CmdSetScissor(cmd, 0, 1, &scissor)
+
+    nuklear_draw(n, cmd)
+}
+
 nuklear_draw :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
+
     tracy.ZoneN("Nuklear Render")
 
     w := cast(f32)n.pipeline.swapchain.extent.width
     h := cast(f32)n.pipeline.swapchain.extent.height
 
     projection := mat4{
-        2.0 /w ,  0.0,  0.0, 0.0,
-        0.0, -2.0 / h ,  0.0, 0.0,
+        2.0 /w ,  0.0,  0.0, -1.0,
+        0.0, -2.0 / h ,  0.0, 1.0,
         0.0,  0.0, -1.0, 0.0,
-       -1.0,  1.0,  0.0, 1.0,
+        0.0,  0.0,  0.0, 1.0,
     }
 
     // projection[0][0] /= cast(f32)n.pipeline.swapchain.extent.width
     // projection[1][1] /= cast(f32)n.pipeline.swapchain.extent.height
 
-    // projection = linalg.matrix_ortho3d_f32(-2, 2, -2, 2, -1, 1)
+    // projection := linalg.matrix_ortho3d_f32(0, w, h, 0, -1, 1)
 
     mem.copy(n.pipeline.uniform_mapped_buffers[0], &projection, size_of(mat4))
 
@@ -218,8 +285,8 @@ nuklear_draw :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
         config.curve_segment_count = 22
         config.arc_segment_count = 22
         config.global_alpha = 1.0
-        config.shape_aa = .On
-        config.line_aa = .On
+        config.shape_aa = .Off
+        config.line_aa = .Off
 
         vbuf: nk.Buffer
         nk.buffer_init_fixed(&vbuf, n.pipeline.vertex_mapped, MAX_VERTEX_BUFFER)
@@ -227,13 +294,12 @@ nuklear_draw :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
         ibuf: nk.Buffer
         nk.buffer_init_fixed(&ibuf, n.pipeline.index_mapped, MAX_INDEX_BUFFER)
 
-        nk.convert(c, &n.cmds, &vbuf, &ibuf, &config)
+        _ = nk.convert(c, &n.cmds, &vbuf, &ibuf, &config)
 
         offset := vk.DeviceSize(0)
         vk.CmdBindVertexBuffers(cmd, 0, 1, &n.pipeline.vertex_buffer.handle, &offset)
         vk.CmdBindIndexBuffer(cmd, n.pipeline.index_buffer.handle, 0, .UINT16)
 
-        current_texture: vk.ImageView
         index_offset: u32 = 0
         for command := nk._draw_begin(c, &n.cmds); command != nil; command = nk._draw_next(command, &n.cmds, c) {
             if command.texture.ptr == nil {
@@ -241,7 +307,7 @@ nuklear_draw :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
             }
             
             img := (transmute(^vk.ImageView)command.texture.ptr)^
-            if img != 0 && img != current_texture {
+            if img != 0 {
                 found := false
                 set_index := 0
                 
@@ -342,8 +408,7 @@ nk_handle_event :: proc(n: ^Nuklear, event: sdl.Event) {
                 }
         }
 
-    case .MOUSEBUTTONUP: /* MOUSEBUTTONUP & MOUSEBUTTONDOWN share same routine */
-    case .MOUSEBUTTONDOWN:
+    case .MOUSEBUTTONDOWN, .MOUSEBUTTONUP:
         x := event.button.x
         y := event.button.y
         down := b32(event.type == .MOUSEBUTTONDOWN)
@@ -406,7 +471,6 @@ nk_font_stash_begin :: proc(n: ^Nuklear, atlas: ^^nk.Font_Atlas) {
     atlas^ = &n.atlas
 }
 
-
 nk_font_stash_end ::proc (n: ^Nuklear) {
     // const void *image; int w, h;
     image_raw: [^]byte
@@ -468,9 +532,10 @@ nuklear_create_texture_set_layout :: proc(device: ^Device) -> (layout: vk.Descri
     return
 }
 
-nuklear_cubemap_pipeline :: proc(pipeline: ^Nuklear_Pipeline) {
+nuklear_create_pipeline :: proc(n: ^Nuklear) {
+    pipeline := &n.pipeline
     config := default_pipeline_config()
-    config.renderpass = pipeline.swapchain.renderpass
+    config.renderpass = n.pipeline.swapchain.renderpass
     config.layout = pipeline.pipeline_layout
     config.descriptor_set_layout = pipeline.descriptor_layout
 
@@ -524,6 +589,7 @@ nuklear_cubemap_pipeline :: proc(pipeline: ^Nuklear_Pipeline) {
     }
 
     rasterizer_create_info := config.rasterization_info
+    rasterizer_create_info.frontFace = .CLOCKWISE
     multisampling_create_info := config.multisample_info
     multisampling_create_info.rasterizationSamples = device_get_max_usable_sample_count(pipeline.device)
     color_blending := config.colorblend_info
@@ -587,8 +653,8 @@ NkVertex :: struct {
 
 nuklear_vertex_binding_description :: proc() -> vk.VertexInputBindingDescription {
     return {
-        binding = 0, 
-        stride = size_of(NkVertex), 
+        binding = 0,
+        stride = size_of(NkVertex),
         inputRate = vk.VertexInputRate.VERTEX,
     }
 }
@@ -659,4 +725,100 @@ nuklear_update_texture_set :: proc(n: ^Nuklear, set: ^Nuklear_Descriptor_Set, vi
     }
 
     vk.UpdateDescriptorSets(n.device.device, 1, &write, 0, nil)
+}
+
+
+nuklear_create_render_pass :: proc(n: ^Nuklear) {
+    // samples := device_get_max_usable_sample_count(n.device)
+    color_attachment := vk.AttachmentDescription {
+        format = .R8G8B8A8_SRGB,
+        samples = {._1},
+        loadOp = vk.AttachmentLoadOp.CLEAR,
+        storeOp = vk.AttachmentStoreOp.STORE,
+        stencilLoadOp = vk.AttachmentLoadOp.DONT_CARE,
+        stencilStoreOp = vk.AttachmentStoreOp.DONT_CARE,
+        initialLayout = vk.ImageLayout.UNDEFINED,
+        finalLayout = vk.ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+    }
+
+    // depth_attachment := vk.AttachmentDescription {
+    //     format = n.pipeline.swapchain.color_format,
+    //     samples = {._1},
+    //     loadOp = .CLEAR,
+    //     storeOp = .STORE,
+    //     stencilLoadOp = .DONT_CARE,
+    //     stencilStoreOp = .DONT_CARE,
+    //     initialLayout = .UNDEFINED,
+    //     finalLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    // }
+
+    color_attachment_ref := vk.AttachmentReference {
+        attachment = 0,
+        layout     = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+    }
+
+    // depth_attachment_ref := vk.AttachmentReference {
+    //     attachment = 1,
+    //     layout     = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    // }
+
+    subpass := vk.SubpassDescription {
+        pipelineBindPoint       = vk.PipelineBindPoint.GRAPHICS,
+        colorAttachmentCount    = 1,
+        // pDepthStencilAttachment = &depth_attachment_ref,
+        pColorAttachments       = &color_attachment_ref,
+    }
+
+    dependency := vk.SubpassDependency {
+        srcSubpass = vk.SUBPASS_EXTERNAL,
+        dstSubpass = 0,
+        srcStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
+        srcAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstStageMask = {vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
+        dstAccessMask = {vk.AccessFlag.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+    }
+
+    attachments := []vk.AttachmentDescription{color_attachment}
+
+    render_pass_create_info := vk.RenderPassCreateInfo {
+        sType           = vk.StructureType.RENDER_PASS_CREATE_INFO,
+        attachmentCount = u32(len(attachments)),
+        pAttachments    = raw_data(attachments),
+        subpassCount    = 1,
+        pSubpasses      = &subpass,
+        dependencyCount = 1,
+        pDependencies   = &dependency,
+    }
+
+    result := vk.CreateRenderPass(
+        n.device.device,
+        &render_pass_create_info,
+        nil,
+        &n.render_pass,
+    )
+    if result != vk.Result.SUCCESS {
+        log.error("Failed to crete render pass")
+    }
+}
+
+nuklear_create_framebuffer :: proc(n: ^Nuklear) {
+    attachments := []vk.ImageView {
+        n.framebuffer_image.view,
+    }
+
+    framebuffer_info := vk.FramebufferCreateInfo {
+        sType           = .FRAMEBUFFER_CREATE_INFO,
+        renderPass      = n.render_pass,
+        attachmentCount = u32(len(attachments)),
+        pAttachments    = raw_data(attachments),
+        width           = n.pipeline.swapchain.extent.width,
+        height          = n.pipeline.swapchain.extent.height,
+        layers          = 1,
+    }
+    vk_check(vk.CreateFramebuffer(
+        n.device.device,
+        &framebuffer_info,
+        nil,
+        &n.framebuffer,
+    ))
 }

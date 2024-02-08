@@ -529,7 +529,7 @@ else
     }
 }
 
-when #config(NK_INCLUDE_FONT_BAKING, false)
+when true
 {
     Font_Coord_Type :: enum i32
     {
@@ -2190,9 +2190,10 @@ else
 }
 
 
-when ODIN_OS == .Windows && ODIN_ARCH == .amd64
-{
+when ODIN_OS == .Windows && ODIN_ARCH == .amd64 {
     foreign import nuklear "nuklear_windows_amd64.lib"
+} else when ODIN_OS == .Linux {
+    foreign import nuklear "nuklear_linux.a"
 }
 
 @(default_calling_convention="c", link_prefix="nk_")
