@@ -1,6 +1,3 @@
 [submodule "packages/odin-vma"]
 	path = packages/odin-vma
 	url = https://github.com/DanielGavin/odin-vma
-[submodule "packages/odin-tracy"]
-	path = packages/odin-tracy
-	url = https://github.com/oskarnp/odin-tracy
