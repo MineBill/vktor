@@ -73,6 +73,7 @@ Camera :: struct {
 }
 
 Application :: struct {
+    img: nk.Image,
     window:                     ^sdl.Window,
     start_time:                 time.Time,
     device:                     Device,
@@ -302,6 +303,7 @@ init :: proc(window: ^sdl.Window, imgui_ctx: ^imgui.Context) -> rawptr {
 
     create_uniform_buffers(app)
 
+        app.img = nk.image_ptr(&app.shadow_pass.color_image.view)
     // app.swapchain.color_image.extra.ds = imgui_vulkan.AddTexture(
     //     app.swapchain.color_image.sampler,
     //     app.swapchain.color_image.view,
@@ -406,14 +408,54 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
 
     c := &app.nuke.ctx
     // nk.clear(c)
-    if nk.begin(c, "Pepegas", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title}) {
-        nk.layout_row_static(c, 30, 80, 1);
+    if nk.begin(c, "Pepegas", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title, .Scalable}) {
+        // nk.layout_row_static(c, 30, 80, 2)
+        nk.layout_row_dynamic(c, 20, 2)
         if nk.button_text(c, "Test", 4) {
             log.debugf("Pepegas")
         }
-        nk.text_string(c, "Pepegas", {.Top})
+        if nk.button_text(c, "Test2", 4) {
+            log.debugf("Pepegas")
+        }
+        if nk.button_text(c, "Test3", 4) {
+            log.debugf("Pepegas")
+        }
+        if nk.button_text(c, "Test3", 4) {
+            log.debugf("Pepegas")
+        }
+        // nk.image(c, nk.image_ptr(&app.cubemap_pipeline.image.view))
+        // nk.text_string(c, "Pepegasaaaa", {.Middle})
     }
     nk.end(c)
+
+    if nk.begin(c, "Pepegas2", nk.rect(50, 50, 230, 250), {.Border, .Movable, .Title, .Scalable}) {
+        // nk.layout_row_static(c, 30, 80, 2)
+        nk.layout_row_dynamic(c, 20, 2)
+        if nk.button_text(c, "Test", 4) {
+            log.debugf("Pepegas")
+        }
+        if nk.button_text(c, "Test2", 5) {
+            log.debugf("Pepegas")
+        }
+        if nk.button_text(c, "Test3", 5) {
+            log.debugf("Pepegas")
+        }
+        if nk.button_text(c, "Test4", 5) {
+            log.debugf("Pepegas")
+        }
+        // nk.image(c, nk.image_ptr(&app.cubemap_pipeline.image.view))
+        // nk.text_string(c, "Pepegasaaaa", {.Middle})
+    }
+    nk.end(c)
+
+    if (nk.begin(c, "Hm", nk.rect(500, 300, 200, 200),
+            {.Border , .Movable , .Scalable ,
+                     .Minimizable , .Title})) {
+        nk.layout_row_dynamic(c, 20, 2)
+        @static b := b32(false)
+        nk.checkbox_label(c, "Hmmm", &b)
+    }
+    nk.end(c);
 
     // === START OF DRAWING ===
     imgui_vulkan.NewFrame()
@@ -511,14 +553,14 @@ update :: proc(mem: rawptr, delta: f64) -> bool {
     }
     imgui.End()
 
-    if imgui.Begin("Depth Pass", nil, {}) {
-        size := imgui.GetContentRegionAvail()
-        imgui.Image(
-            transmute(imgui.TextureID)app.shadow_pass.color_image.extra.ds,
-            size,
-        )
-    }
-    imgui.End()
+    // if imgui.Begin("Depth Pass", nil, {}) {
+    //     size := imgui.GetContentRegionAvail()
+    //     imgui.Image(
+    //         transmute(imgui.TextureID)app.shadow_pass.color_image.extra.ds,
+    //         size,
+    //     )
+    // }
+    // imgui.End()
 
     // if imgui.Begin("Viewport", nil, {}) {
     //     size := imgui.GetContentRegionAvail()

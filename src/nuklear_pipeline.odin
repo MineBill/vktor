@@ -46,6 +46,7 @@ Nuklear_Pipeline :: struct {
     descriptor_layout:  vk.DescriptorSetLayout,
     texture_set_layout: vk.DescriptorSetLayout,
     texture_sets:       []Nuklear_Descriptor_Set,
+    texture_sets_len:   u32,
     descriptor_pool:    vk.DescriptorPool,
 
     uniform_buffers:        []Buffer,
@@ -311,16 +312,18 @@ nuklear_draw :: proc(n: ^Nuklear, cmd: vk.CommandBuffer) {
                 found := false
                 set_index := 0
                 
-                for set, i in n.pipeline.texture_sets {
+                for i in 0 ..< n.pipeline.texture_sets_len {
+                    set := &n.pipeline.texture_sets[i]
                     if set.view == img {
                         found = true
-                        set_index = i
+                        set_index = int(i)
                         break
                     }
                 }
 
                 if !found {
                     nuklear_update_texture_set(n, &n.pipeline.texture_sets[set_index], img)
+                    n.pipeline.texture_sets_len += 1
                 }
 
                 vk.CmdBindDescriptorSets(
